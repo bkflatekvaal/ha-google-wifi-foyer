@@ -2,23 +2,24 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
-from homeassistant.components.device_tracker import ScannerEntity
+from homeassistant.components.device_tracker.entity import ScannerEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.device_registry import format_mac
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_GROUP_ID, DOMAIN
+from .const import CONF_GROUP_ID
 from .coordinator import GoogleWifiFoyerCoordinator
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up station trackers."""
     coordinator: GoogleWifiFoyerCoordinator = entry.runtime_data
@@ -56,10 +57,10 @@ class GoogleWifiFoyerStationTracker(
         station_id: str,
     ) -> None:
         super().__init__(coordinator)
-        self._entry = entry
         self._station_id = station_id
         self._attr_unique_id = f"{entry.data[CONF_GROUP_ID]}_{station_id}"
         self._attr_name = self._station_name
+        self._attr_mac_address = _station_mac(self._station)
 
     @property
     def _station(self) -> dict[str, Any]:
@@ -83,6 +84,11 @@ class GoogleWifiFoyerStationTracker(
     def is_connected(self) -> bool:
         """Return whether the station is connected."""
         return self._station.get("connected") is True
+
+    @property
+    def entity_registry_enabled_default(self) -> bool:
+        """Keep all stations enabled until the user disables unwanted ones."""
+        return True
 
     @property
     def ip_address(self) -> str | None:
@@ -131,20 +137,23 @@ class GoogleWifiFoyerStationTracker(
 
         return {key: value for key, value in attrs.items() if value is not None}
 
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Return device registry information."""
-        station = self._station
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._attr_unique_id)},
-            name=self._station_name,
-            manufacturer=_string_or_none(station.get("curatedOuiName")),
-            model=_string_or_none(station.get("friendlyType")),
-        )
-
 
 def _string_or_none(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _station_mac(station: dict[str, Any]) -> str | None:
+    """Return a normalized MAC address when Google provides one."""
+    for key in ("macAddress", "mac", "id"):
+        value = station.get(key)
+        if not isinstance(value, str):
+            continue
+
+        normalized = format_mac(value.strip())
+        if re.fullmatch(r"(?:[0-9a-f]{2}:){5}[0-9a-f]{2}", normalized):
+            return normalized
+
+    return None
 
 
 def _human_connection_type(value: Any) -> str | None:

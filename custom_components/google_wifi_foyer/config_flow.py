@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import secrets
 from typing import Any
 
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.const import CONF_EMAIL
-from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -25,6 +26,8 @@ from .const import (
     CONF_NETWORK_NAME,
     DOMAIN,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _network_name(group: dict[str, Any]) -> str:
@@ -50,7 +53,7 @@ class GoogleWifiFoyerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Authenticate with Google using an EmbeddedSetup oauth_token."""
         errors: dict[str, str] = {}
 
@@ -90,6 +93,7 @@ class GoogleWifiFoyerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except GoogleWifiFoyerConnectionError:
                 errors["base"] = "cannot_connect"
             except Exception:
+                _LOGGER.exception("Unexpected error during Google Wifi setup")
                 errors["base"] = "unknown"
 
         schema = vol.Schema(
@@ -107,7 +111,7 @@ class GoogleWifiFoyerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_network(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Select which Google Wifi network this config entry represents."""
         if not self._groups or self._email is None or self._master_token is None:
             return self.async_abort(reason="reauth_required")
@@ -124,7 +128,9 @@ class GoogleWifiFoyerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             group_id = user_input[CONF_GROUP_ID]
-            group = group_by_id[group_id]
+            group = group_by_id.get(group_id)
+            if group is None:
+                return self.async_abort(reason="reauth_required")
             network_name = _network_name(group)
 
             await self.async_set_unique_id(group_id)
@@ -159,13 +165,13 @@ class GoogleWifiFoyerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_reauth(
         self, entry_data: dict[str, Any]
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Start reauthentication."""
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Reauthenticate using a fresh EmbeddedSetup oauth_token."""
         entry = self._get_reauth_entry()
         errors: dict[str, str] = {}
@@ -196,13 +202,11 @@ class GoogleWifiFoyerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except GoogleWifiFoyerConnectionError:
                 errors["base"] = "cannot_connect"
             except Exception:
+                _LOGGER.exception(
+                    "Unexpected error during Google Wifi reauthentication"
+                )
                 errors["base"] = "unknown"
             else:
-                new_data = {
-                    **entry.data,
-                    CONF_MASTER_TOKEN: master_token,
-                    CONF_ANDROID_ID: android_id,
-                }
                 return self.async_update_reload_and_abort(
                     entry,
                     data_updates={

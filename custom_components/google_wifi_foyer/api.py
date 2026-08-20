@@ -10,6 +10,7 @@ from typing import Any
 
 import aiohttp
 import gpsoauth
+from requests import RequestException
 
 from homeassistant.core import HomeAssistant
 
@@ -22,6 +23,8 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+GPSOAUTH_TIMEOUT_SECONDS = 30
 
 
 class GoogleWifiFoyerError(Exception):
@@ -77,7 +80,12 @@ class GoogleWifiFoyerApi:
             return gpsoauth.exchange_token(email, oauth_token, android_id)
 
         try:
-            response = await hass.async_add_executor_job(_exchange)
+            async with asyncio.timeout(GPSOAUTH_TIMEOUT_SECONDS):
+                response = await hass.async_add_executor_job(_exchange)
+        except (RequestException, asyncio.TimeoutError) as err:
+            raise GoogleWifiFoyerConnectionError(
+                f"Could not connect to Google authentication: {err}"
+            ) from err
         except Exception as err:
             raise GoogleWifiFoyerAuthError(
                 f"Token exchange failed: {err}"
@@ -126,7 +134,12 @@ class GoogleWifiFoyerApi:
                 )
 
             try:
-                response = await self._hass.async_add_executor_job(_oauth)
+                async with asyncio.timeout(GPSOAUTH_TIMEOUT_SECONDS):
+                    response = await self._hass.async_add_executor_job(_oauth)
+            except (RequestException, asyncio.TimeoutError) as err:
+                raise GoogleWifiFoyerConnectionError(
+                    f"Could not connect to Google authentication: {err}"
+                ) from err
             except Exception as err:
                 raise GoogleWifiFoyerAuthError(
                     f"Could not refresh Google access token: {err}"
@@ -190,7 +203,7 @@ class GoogleWifiFoyerApi:
 
             except GoogleWifiFoyerError:
                 raise
-            except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
                 raise GoogleWifiFoyerConnectionError(
                     f"Could not connect to Foyer: {err}"
                 ) from err
@@ -201,7 +214,9 @@ class GoogleWifiFoyerApi:
         """Return Google Wifi networks available to the account."""
         data = await self._async_get_json("/v2/groups?prettyPrint=false")
         groups = data.get("groups", [])
-        return groups if isinstance(groups, list) else []
+        if not isinstance(groups, list):
+            return []
+        return [group for group in groups if isinstance(group, dict)]
 
     async def async_get_stations(self, group_id: str) -> list[dict[str, Any]]:
         """Return stations for one Google Wifi network."""
@@ -209,4 +224,6 @@ class GoogleWifiFoyerApi:
             f"/v2/groups/{group_id}/stations?prettyPrint=false"
         )
         stations = data.get("stations", [])
-        return stations if isinstance(stations, list) else []
+        if not isinstance(stations, list):
+            return []
+        return [station for station in stations if isinstance(station, dict)]
