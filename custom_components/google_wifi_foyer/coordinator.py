@@ -152,3 +152,21 @@ def _string_value(data: Any, key: str) -> str | None:
         return None
     value = data.get(key)
     return value if isinstance(value, str) and value else None
+
+
+def access_point_display_name(access_point: dict[str, Any]) -> str:
+    """Return an access point name that includes its room when available."""
+    name = access_point.get("name")
+    room_name = access_point.get("room_name")
+
+    if isinstance(name, str) and name:
+        if (
+            isinstance(room_name, str)
+            and room_name
+            and room_name.casefold() != name.casefold()
+        ):
+            return f"{name} ({room_name})"
+        return name
+    if isinstance(room_name, str) and room_name:
+        return room_name
+    return "Google Wifi access point"

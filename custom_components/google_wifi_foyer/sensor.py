@@ -13,7 +13,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_GROUP_ID, DOMAIN
-from .coordinator import GoogleWifiFoyerCoordinator
+from .coordinator import GoogleWifiFoyerCoordinator, access_point_display_name
 
 
 async def async_setup_entry(
@@ -66,9 +66,7 @@ class GoogleWifiFoyerAccessPointsSensor(
             "access_points": [
                 {
                     "id": access_point_id,
-                    "name": access_point.get("name")
-                    or access_point.get("room_name")
-                    or "Google Wifi access point",
+                    "name": access_point_display_name(access_point),
                 }
                 for access_point_id, access_point in sorted(
                     self.coordinator.access_points.items()

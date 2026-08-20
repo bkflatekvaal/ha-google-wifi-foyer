@@ -17,7 +17,7 @@ from .const import (
     DOMAIN,
     PLATFORMS,
 )
-from .coordinator import GoogleWifiFoyerCoordinator
+from .coordinator import GoogleWifiFoyerCoordinator, access_point_display_name
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -43,15 +43,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         model="Google Wifi network",
     )
 
+    # Trackers used to create one device-registry entry per station. Remove those
+    # legacy devices; the device_tracker entities remain available independently.
+    for station_id in coordinator.data:
+        station_device = device_registry.async_get_device(
+            identifiers={
+                (DOMAIN, f"{entry.data[CONF_GROUP_ID]}_{station_id}")
+            }
+        )
+        if station_device is not None:
+            device_registry.async_remove_device(station_device.id)
+
     for access_point_id, access_point in coordinator.access_points.items():
         device_registry.async_get_or_create(
             config_entry_id=entry.entry_id,
             identifiers={
                 (DOMAIN, f"{entry.data[CONF_GROUP_ID]}_{access_point_id}")
             },
-            name=access_point.get("name")
-            or access_point.get("room_name")
-            or "Google Wifi access point",
+            name=access_point_display_name(access_point),
             manufacturer=access_point.get("manufacturer") or "Google",
             model=access_point.get("model") or "Google Wifi access point",
             serial_number=access_point.get("serial_number"),

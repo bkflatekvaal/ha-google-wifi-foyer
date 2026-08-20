@@ -6,7 +6,7 @@ It uses Google's undocumented `googlehomefoyer-pa.googleapis.com` API and the
 `https://www.googleapis.com/auth/accesspoints` OAuth scope. This may stop working
 without notice if Google changes the private API or authentication flow.
 
-## Current v0.1.3 scope
+## Current v0.1.5 scope
 
 - UI config flow
 - EmbeddedSetup `oauth_token` -> reusable `aas_et` master token
@@ -23,7 +23,7 @@ without notice if Google changes the private API or authentication flow.
 - Friendly type/manufacturer metadata
 - Offline `last_seen`
 - Automatic reauthentication flow if the stored master token stops working
-- Create one child device for each access point in the selected Wifi network
+- Create one child device for each access point, named with its room
 - Show an IP address diagnostic sensor on each access point device
 - Show an access point count/list diagnostic sensor on the Wifi network device
 
@@ -62,7 +62,8 @@ Google's station API reports current clients with `connected: true`. Offline cli
 are normally returned with `status.type = STATION_OFFLINE` and a `lastSeen` timestamp.
 
 All stations returned by Google are created as device trackers, including old/offline
-stations. Disable unwanted entities in Home Assistant's entity registry.
+stations. Trackers do not create device-registry entries. Disable unwanted entities
+in Home Assistant's entity registry.
 
 ## Notes
 

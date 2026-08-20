@@ -8,12 +8,11 @@ from typing import Any
 from homeassistant.components.device_tracker import ScannerEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers.device_registry import DeviceInfo, format_mac
+from homeassistant.helpers.device_registry import format_mac
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_GROUP_ID, DOMAIN
+from .const import CONF_GROUP_ID
 from .coordinator import GoogleWifiFoyerCoordinator
 
 
@@ -59,7 +58,6 @@ class GoogleWifiFoyerStationTracker(
     ) -> None:
         super().__init__(coordinator)
         self._station_id = station_id
-        self._group_id = entry.data[CONF_GROUP_ID]
         self._attr_unique_id = f"{entry.data[CONF_GROUP_ID]}_{station_id}"
         self._attr_name = self._station_name
 
@@ -115,21 +113,6 @@ class GoogleWifiFoyerStationTracker(
     def mac_address(self) -> str | None:
         """Return the normalized MAC address reported by sensitive info."""
         return _station_mac(self._station)
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Return the stable station device and its optional MAC connection."""
-        mac_address = self.mac_address
-        connections = (
-            {(dr.CONNECTION_NETWORK_MAC, mac_address)} if mac_address else set()
-        )
-        return DeviceInfo(
-            identifiers={(DOMAIN, f"{self._group_id}_{self._station_id}")},
-            connections=connections,
-            name=self._station_name,
-            manufacturer=_string_or_none(self._station.get("curatedOuiName")),
-            model=_string_or_none(self._station.get("friendlyType")),
-        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
