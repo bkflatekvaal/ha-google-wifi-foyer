@@ -1,0 +1,16 @@
+{
+  "domain": "google_wifi_foyer",
+  "name": "Google Wifi Foyer",
+  "codeowners": [
+    "@bkflatekvaal"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/bkflatekvaal/ha-google-wifi-foyer",
+  "issue_tracker": "https://github.com/bkflatekvaal/ha-google-wifi-foyer/issues",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "requirements": [
+    "gpsoauth==2.0.0"
+  ],
+  "version": "0.1.0"
+}

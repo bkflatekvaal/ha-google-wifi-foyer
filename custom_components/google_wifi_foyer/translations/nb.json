@@ -1,0 +1,44 @@
+{
+  "title": "Google Wifi Foyer",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Koble til Google Wifi",
+        "description": "Åpne https://accounts.google.com/EmbeddedSetup i en nettleser, logg inn med Google-kontoen som eier eller administrerer Wifi-nettverket, og kopier hele verdien til cookien `oauth_token` (inkludert `oauth2_4/`). Cookien brukes bare under oppsett og lagres ikke.",
+        "data": {
+          "email": "Google-konto",
+          "oauth_token": "EmbeddedSetup oauth_token"
+        },
+        "data_description": {
+          "email": "Google-kontoen som har tilgang til Wifi-nettverket.",
+          "oauth_token": "Hele verdien til `oauth_token`-cookien fra accounts.google.com."
+        }
+      },
+      "network": {
+        "title": "Velg Wifi-nettverk",
+        "description": "Velg Google Wifi-nettverket som skal legges til. Kjør oppsettet på nytt dersom du vil legge til et annet nettverk fra samme konto.",
+        "data": {
+          "group_id": "Wifi-nettverk"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Koble Google Wifi til på nytt",
+        "description": "Autentiseringen for {email} må fornyes. Hent en ny `oauth_token` fra https://accounts.google.com/EmbeddedSetup.",
+        "data": {
+          "oauth_token": "EmbeddedSetup oauth_token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Kunne ikke koble til Google Wifi Foyer-tjenesten.",
+      "invalid_auth": "Google-autentisering feilet. Hent en ny oauth_token fra EmbeddedSetup og prøv igjen.",
+      "no_networks": "Fant ingen Google Wifi-nettverk på denne kontoen.",
+      "unknown": "Uventet feil."
+    },
+    "abort": {
+      "already_configured": "Dette Google Wifi-nettverket er allerede konfigurert.",
+      "reauth_required": "Autentiseringen må startes på nytt.",
+      "reauth_successful": "Google Wifi-autentiseringen ble fornyet."
+    }
+  }
+}

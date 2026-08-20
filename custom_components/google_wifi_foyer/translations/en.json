@@ -1,0 +1,44 @@
+{
+  "title": "Google Wifi Foyer",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Google Wifi",
+        "description": "Open https://accounts.google.com/EmbeddedSetup in a browser, sign in to the Google account that owns or manages the Wifi network, then copy the full `oauth_token` cookie value (including `oauth2_4/`). The cookie is only used during setup and is not stored.",
+        "data": {
+          "email": "Google account email",
+          "oauth_token": "EmbeddedSetup oauth_token"
+        },
+        "data_description": {
+          "email": "The Google account that has access to the Wifi network.",
+          "oauth_token": "The complete value of the `oauth_token` cookie from accounts.google.com."
+        }
+      },
+      "network": {
+        "title": "Choose Wifi network",
+        "description": "Choose the Google Wifi network to add. Run the integration setup again if you want to add another network from the same account.",
+        "data": {
+          "group_id": "Wifi network"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reconnect Google Wifi",
+        "description": "Authentication for {email} needs to be renewed. Get a fresh `oauth_token` from https://accounts.google.com/EmbeddedSetup.",
+        "data": {
+          "oauth_token": "EmbeddedSetup oauth_token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to the Google Wifi Foyer service.",
+      "invalid_auth": "Google authentication failed. Get a fresh oauth_token from EmbeddedSetup and try again.",
+      "no_networks": "No Google Wifi networks were returned for this account.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "already_configured": "This Google Wifi network is already configured.",
+      "reauth_required": "Authentication needs to be started again.",
+      "reauth_successful": "Google Wifi authentication was renewed successfully."
+    }
+  }
+}
