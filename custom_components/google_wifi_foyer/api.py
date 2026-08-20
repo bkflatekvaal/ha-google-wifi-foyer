@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import ipaddress
 import logging
 import time
 from typing import Any
@@ -28,6 +29,7 @@ _LOGGER = logging.getLogger(__name__)
 
 GPSOAUTH_TIMEOUT_SECONDS = 30
 FOYER_GRPC_TIMEOUT_SECONDS = 30
+LOCAL_STATUS_TIMEOUT_SECONDS = 5
 
 _CREATE_SENSITIVE_OPERATION = (
     "/google.wirelessaccess.accesspoints.v2.StationsService/"
@@ -196,7 +198,8 @@ class GoogleWifiFoyerApi:
                     if response.status in (401, 403):
                         text = await response.text()
                         raise GoogleWifiFoyerAuthError(
-                            f"Foyer authentication failed ({response.status}): {text[:300]}"
+                            "Foyer authentication failed "
+                            f"({response.status}): {text[:300]}"
                         )
 
                     if response.status >= 400:
@@ -249,6 +252,39 @@ class GoogleWifiFoyerApi:
         if not isinstance(stations, list):
             return []
         return [station for station in stations if isinstance(station, dict)]
+
+    async def async_get_local_status(self, host: str) -> dict[str, Any]:
+        """Return status data from a Google Wifi access point's local API."""
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError as err:
+            raise GoogleWifiFoyerConnectionError(
+                f"Invalid access point IP address: {host}"
+            ) from err
+
+        if not (address.is_private or address.is_link_local):
+            raise GoogleWifiFoyerConnectionError(
+                f"Refusing to query non-local access point address: {host}"
+            )
+
+        formatted_host = f"[{address}]" if address.version == 6 else str(address)
+        try:
+            async with self._session.get(
+                f"http://{formatted_host}/api/v1/status",
+                timeout=aiohttp.ClientTimeout(total=LOCAL_STATUS_TIMEOUT_SECONDS),
+            ) as response:
+                response.raise_for_status()
+                data = await response.json(content_type=None)
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
+            raise GoogleWifiFoyerConnectionError(
+                f"Could not fetch local status from {host}: {err}"
+            ) from err
+
+        if not isinstance(data, dict):
+            raise GoogleWifiFoyerConnectionError(
+                f"Access point {host} returned an unexpected response"
+            )
+        return data
 
     async def async_get_sensitive_info(
         self, group_id: str, station_ids: list[str]

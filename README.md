@@ -6,7 +6,7 @@ It uses Google's undocumented `googlehomefoyer-pa.googleapis.com` API and the
 `https://www.googleapis.com/auth/accesspoints` OAuth scope. This may stop working
 without notice if Google changes the private API or authentication flow.
 
-## Current v0.1.5 scope
+## Current v0.2.1 scope
 
 - UI config flow
 - EmbeddedSetup `oauth_token` -> reusable `aas_et` master token
@@ -25,22 +25,32 @@ without notice if Google changes the private API or authentication flow.
 - Automatic reauthentication flow if the stored master token stops working
 - Create one child device for each access point, named with its room
 - Show an IP address diagnostic sensor on each access point device
+- Show local firmware, update, uptime, restart, WAN IP, and status diagnostics
+  from each access point's `/api/v1/status` endpoint
+- Show a connected-client count and structured client list on each access point
 - Show an access point count/list diagnostic sensor on the Wifi network device
 
 ## Installation
 
-Copy:
+### HACS (recommended)
 
-`custom_components/google_wifi_foyer`
+1. Open HACS in Home Assistant and select **Integrations**.
+2. Open the menu in the upper-right corner and select **Custom repositories**.
+3. Enter `https://github.com/bkflatekvaal/google_wifi_foyer`, select
+   **Integration** as the category, and add the repository.
+4. Find **Google Wifi Foyer** in HACS and select **Download**.
+5. Restart Home Assistant.
+6. Go to **Settings -> Devices & services -> Add integration** and select
+   **Google Wifi Foyer**.
 
-to:
+### Manual installation
 
-`/config/custom_components/google_wifi_foyer`
+Copy `custom_components/google_wifi_foyer` from the
+[repository](https://github.com/bkflatekvaal/google_wifi_foyer) to
+`/config/custom_components/google_wifi_foyer`, then restart Home Assistant and
+add **Google Wifi Foyer** from **Settings -> Devices & services**.
 
-Restart Home Assistant, then add **Google Wifi Foyer** from
-**Settings -> Devices & services -> Add integration**.
-
-Home Assistant installs the Python dependency `gpsoauth==2.0.0` automatically.
+Home Assistant installs the required Python dependencies automatically.
 
 ## Getting the oauth_token
 

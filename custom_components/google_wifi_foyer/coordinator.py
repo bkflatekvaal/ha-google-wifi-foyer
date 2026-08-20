@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -64,6 +65,32 @@ class GoogleWifiFoyerCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         and access_point["id"]
                     }
                 self._access_points_loaded = True
+
+            local_status_results = await asyncio.gather(
+                *(
+                    self.api.async_get_local_status(access_point["ip_address"])
+                    for access_point in self.access_points.values()
+                    if access_point.get("ip_address")
+                ),
+                return_exceptions=True,
+            )
+            access_points_with_ip = [
+                access_point
+                for access_point in self.access_points.values()
+                if access_point.get("ip_address")
+            ]
+            for access_point, local_status in zip(
+                access_points_with_ip, local_status_results, strict=True
+            ):
+                if isinstance(local_status, Exception):
+                    access_point["local_status"] = None
+                    _LOGGER.debug(
+                        "Could not update local status for access point %s: %s",
+                        access_point["id"],
+                        local_status,
+                    )
+                else:
+                    access_point["local_status"] = local_status
         except GoogleWifiFoyerAuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
         except GoogleWifiFoyerConnectionError as err:

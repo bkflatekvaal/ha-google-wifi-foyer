@@ -2,18 +2,121 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorEntityDescription,
+)
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
+from homeassistant.const import EntityCategory, UnitOfTime
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_GROUP_ID, DOMAIN
 from .coordinator import GoogleWifiFoyerCoordinator, access_point_display_name
+
+
+@dataclass(frozen=True, kw_only=True)
+class GoogleWifiFoyerLocalSensorDescription(SensorEntityDescription):
+    """Describe a sensor backed by the access point's local status API."""
+
+    value_fn: Callable[[dict[str, Any]], Any]
+
+
+def _nested_value(data: dict[str, Any], section: str, key: str) -> Any:
+    """Return a value from a local status response."""
+    section_data = data.get(section)
+    return section_data.get(key) if isinstance(section_data, dict) else None
+
+
+def _new_version(data: dict[str, Any]) -> str | None:
+    value = _nested_value(data, "software", "updateNewVersion")
+    if value == "0.0.0.0":
+        return "Latest"
+    return value if isinstance(value, str) and value else None
+
+
+def _uptime(data: dict[str, Any]) -> int | float | None:
+    value = _nested_value(data, "system", "uptime")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value
+    return None
+
+
+def _last_restart(data: dict[str, Any]) -> datetime | None:
+    uptime = _uptime(data)
+    return datetime.now(UTC) - timedelta(seconds=uptime) if uptime is not None else None
+
+
+def _wan_ip(data: dict[str, Any]) -> str | None:
+    if _nested_value(data, "wan", "online") is not True:
+        return None
+    value = _nested_value(data, "wan", "localIpAddress")
+    return value if isinstance(value, str) and value else None
+
+
+def _wan_status(data: dict[str, Any]) -> str | None:
+    value = _nested_value(data, "wan", "online")
+    if isinstance(value, bool):
+        return "Online" if value else "Offline"
+    return None
+
+
+LOCAL_SENSOR_DESCRIPTIONS = (
+    GoogleWifiFoyerLocalSensorDescription(
+        key="current_version",
+        name="Current version",
+        icon="mdi:checkbox-marked-circle-outline",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: _nested_value(data, "software", "softwareVersion"),
+    ),
+    GoogleWifiFoyerLocalSensorDescription(
+        key="new_version",
+        name="New version",
+        icon="mdi:update",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_new_version,
+    ),
+    GoogleWifiFoyerLocalSensorDescription(
+        key="uptime",
+        name="Uptime",
+        icon="mdi:timelapse",
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        device_class=SensorDeviceClass.DURATION,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_uptime,
+    ),
+    GoogleWifiFoyerLocalSensorDescription(
+        key="last_restart",
+        name="Last restart",
+        icon="mdi:restart",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_last_restart,
+    ),
+    GoogleWifiFoyerLocalSensorDescription(
+        key="local_ip",
+        name="Local IP",
+        icon="mdi:access-point-network",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_wan_ip,
+    ),
+    GoogleWifiFoyerLocalSensorDescription(
+        key="status",
+        name="Status",
+        icon="mdi:google",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_wan_status,
+    ),
+)
 
 
 async def async_setup_entry(
@@ -31,6 +134,19 @@ async def async_setup_entry(
             coordinator, entry, access_point_id
         )
         for access_point_id in sorted(coordinator.access_points)
+    )
+    entities.extend(
+        GoogleWifiFoyerConnectedClientsSensor(
+            hass, coordinator, entry, access_point_id
+        )
+        for access_point_id in sorted(coordinator.access_points)
+    )
+    entities.extend(
+        GoogleWifiFoyerLocalStatusSensor(
+            coordinator, entry, access_point_id, description
+        )
+        for access_point_id in sorted(coordinator.access_points)
+        for description in LOCAL_SENSOR_DESCRIPTIONS
     )
     async_add_entities(entities)
 
@@ -139,3 +255,158 @@ class GoogleWifiFoyerAccessPointIpSensor(
                 )
             }
         )
+
+
+class GoogleWifiFoyerLocalStatusSensor(
+    CoordinatorEntity[GoogleWifiFoyerCoordinator], SensorEntity
+):
+    """Expose one value from an access point's local status endpoint."""
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: GoogleWifiFoyerCoordinator,
+        entry: ConfigEntry,
+        access_point_id: str,
+        description: GoogleWifiFoyerLocalSensorDescription,
+    ) -> None:
+        super().__init__(coordinator)
+        self._entry = entry
+        self._access_point_id = access_point_id
+        self.entity_description = description
+        self._attr_unique_id = (
+            f"{entry.data[CONF_GROUP_ID]}_{access_point_id}_{description.key}"
+        )
+
+    @property
+    def _local_status(self) -> dict[str, Any] | None:
+        value = self.coordinator.access_points[self._access_point_id].get(
+            "local_status"
+        )
+        return value if isinstance(value, dict) else None
+
+    @property
+    def available(self) -> bool:
+        """Return whether the local endpoint supplied status data."""
+        return super().available and self._local_status is not None
+
+    @property
+    def native_value(self) -> Any:
+        """Return the selected local status value."""
+        if (status := self._local_status) is None:
+            return None
+        return self.entity_description.value_fn(status)
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Attach this sensor to its access point device."""
+        return DeviceInfo(
+            identifiers={
+                (
+                    DOMAIN,
+                    f"{self._entry.data[CONF_GROUP_ID]}_{self._access_point_id}",
+                )
+            }
+        )
+
+
+class GoogleWifiFoyerConnectedClientsSensor(
+    CoordinatorEntity[GoogleWifiFoyerCoordinator], SensorEntity
+):
+    """Show the clients currently connected to one access point."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:lan-connect"
+    _attr_name = "Connected clients"
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        coordinator: GoogleWifiFoyerCoordinator,
+        entry: ConfigEntry,
+        access_point_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._entity_registry = er.async_get(hass)
+        self._entry = entry
+        self._group_id = entry.data[CONF_GROUP_ID]
+        self._access_point_id = access_point_id
+        self._attr_unique_id = (
+            f"{self._group_id}_{access_point_id}_connected_clients"
+        )
+
+    @property
+    def _connected_stations(self) -> list[tuple[str, dict[str, Any]]]:
+        return sorted(
+            (
+                (station_id, station)
+                for station_id, station in self.coordinator.data.items()
+                if station.get("connected") is True
+                and station.get("apId") == self._access_point_id
+            ),
+            key=lambda item: _station_name(item[1]).casefold(),
+        )
+
+    @property
+    def native_value(self) -> int:
+        """Return the number of connected clients."""
+        return len(self._connected_stations)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return structured client data suitable for a topology card."""
+        clients = []
+        for station_id, station in self._connected_stations:
+            unique_id = f"{self._group_id}_{station_id}"
+            client = {
+                "station_id": station_id,
+                "name": _station_name(station),
+                "entity_id": self._entity_registry.async_get_entity_id(
+                    "device_tracker", DOMAIN, unique_id
+                ),
+                "ip_address": _station_ip(station),
+                "mac_address": station.get("macAddress") or station.get("mac"),
+                "connection_type": station.get("connectionType"),
+                "wireless_band": station.get("wirelessBand"),
+            }
+            clients.append(
+                {key: value for key, value in client.items() if value is not None}
+            )
+        return {"access_point_id": self._access_point_id, "clients": clients}
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Attach this sensor to its access point device."""
+        return DeviceInfo(
+            identifiers={
+                (
+                    DOMAIN,
+                    f"{self._group_id}_{self._access_point_id}",
+                )
+            }
+        )
+
+
+def _station_name(station: dict[str, Any]) -> str:
+    """Return the best available client name."""
+    for key in ("friendlyName", "automaticFriendlyName", "dhcpHostname"):
+        value = station.get(key)
+        if isinstance(value, str) and value and value != "Unnamed device":
+            return value
+    return "Unnamed device"
+
+
+def _station_ip(station: dict[str, Any]) -> str | None:
+    """Return the first available client IP address."""
+    value = station.get("ipAddress")
+    if isinstance(value, str) and value:
+        return value
+    values = station.get("ipAddresses")
+    if isinstance(values, list):
+        return next(
+            (value for value in values if isinstance(value, str) and value),
+            None,
+        )
+    return None
