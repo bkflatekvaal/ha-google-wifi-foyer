@@ -10,6 +10,7 @@ from typing import Any
 
 import aiohttp
 import gpsoauth
+import grpc
 from requests import RequestException
 
 from homeassistant.core import HomeAssistant
@@ -17,6 +18,7 @@ from homeassistant.core import HomeAssistant
 from .const import (
     ACCESSPOINTS_SCOPE,
     FOYER_BASE_URL,
+    FOYER_GRPC_TARGET,
     GOOGLE_HOME_APP,
     GOOGLE_HOME_CLIENT_SIG,
     TOKEN_REFRESH_MARGIN_SECONDS,
@@ -25,6 +27,15 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 GPSOAUTH_TIMEOUT_SECONDS = 30
+FOYER_GRPC_TIMEOUT_SECONDS = 30
+
+_CREATE_SENSITIVE_OPERATION = (
+    "/google.wirelessaccess.accesspoints.v2.StationsService/"
+    "CreateOperationForListSensitiveInfo"
+)
+_LIST_SENSITIVE_INFO = (
+    "/google.wirelessaccess.accesspoints.v2.StationsService/ListSensitiveInfo"
+)
 
 
 class GoogleWifiFoyerError(Exception):
@@ -87,9 +98,7 @@ class GoogleWifiFoyerApi:
                 f"Could not connect to Google authentication: {err}"
             ) from err
         except Exception as err:
-            raise GoogleWifiFoyerAuthError(
-                f"Token exchange failed: {err}"
-            ) from err
+            raise GoogleWifiFoyerAuthError(f"Token exchange failed: {err}") from err
 
         master_token = response.get("Token")
         if not master_token:
@@ -147,7 +156,9 @@ class GoogleWifiFoyerApi:
 
             token = response.get("Auth")
             if not token:
-                error = response.get("Error") or response.get("error") or "unknown error"
+                error = (
+                    response.get("Error") or response.get("error") or "unknown error"
+                )
                 raise GoogleWifiFoyerAuthError(
                     f"Google did not return an access token: {error}"
                 )
@@ -218,6 +229,17 @@ class GoogleWifiFoyerApi:
             return []
         return [group for group in groups if isinstance(group, dict)]
 
+    async def async_get_group(self, group_id: str) -> dict[str, Any] | None:
+        """Return one Google Wifi network from the groups response."""
+        return next(
+            (
+                group
+                for group in await self.async_get_groups()
+                if group.get("id") == group_id
+            ),
+            None,
+        )
+
     async def async_get_stations(self, group_id: str) -> list[dict[str, Any]]:
         """Return stations for one Google Wifi network."""
         data = await self._async_get_json(
@@ -227,3 +249,172 @@ class GoogleWifiFoyerApi:
         if not isinstance(stations, list):
             return []
         return [station for station in stations if isinstance(station, dict)]
+
+    async def async_get_sensitive_info(
+        self, group_id: str, station_ids: list[str]
+    ) -> dict[str, dict[str, Any]]:
+        """Return optional MAC and IPv6 information keyed by station ID."""
+        if not station_ids:
+            return {}
+
+        create_request = _encode_string_field(1, group_id) + b"".join(
+            _encode_string_field(2, station_id) for station_id in station_ids
+        )
+        create_response = await self._async_grpc_unary(
+            _CREATE_SENSITIVE_OPERATION, create_request
+        )
+
+        operation = _first_length_delimited(create_response, 1)
+        if operation is None:
+            raise GoogleWifiFoyerConnectionError(
+                "Foyer did not return a sensitive-info operation"
+            )
+        operation_id = _first_string(operation, 1)
+        if not operation_id:
+            raise GoogleWifiFoyerConnectionError(
+                "Foyer returned a sensitive-info operation without an ID"
+            )
+
+        response = await self._async_grpc_unary(
+            _LIST_SENSITIVE_INFO,
+            _encode_string_field(1, operation_id),
+        )
+
+        sensitive_info: dict[str, dict[str, Any]] = {}
+        for record in _length_delimited_fields(response, 2):
+            station_id = _first_string(record, 1)
+            if not station_id:
+                continue
+            mac_address = _first_string(record, 2)
+            ipv6_addresses = [
+                value.decode("utf-8")
+                for value in _length_delimited_fields(record, 3)
+                if value
+            ]
+            sensitive_info[station_id] = {
+                "macAddress": mac_address,
+                "ipv6Addresses": ipv6_addresses,
+            }
+
+        return sensitive_info
+
+    async def _async_grpc_unary(self, path: str, request: bytes) -> bytes:
+        """Perform an authenticated unary Foyer gRPC request."""
+        token = await self._async_get_access_token()
+
+        for attempt in range(2):
+            channel = grpc.aio.secure_channel(
+                FOYER_GRPC_TARGET, grpc.ssl_channel_credentials()
+            )
+            try:
+                call = channel.unary_unary(
+                    path,
+                    request_serializer=lambda value: value,
+                    response_deserializer=lambda value: value,
+                )
+                return await call(
+                    request,
+                    metadata=(("authorization", f"Bearer {token}"),),
+                    timeout=FOYER_GRPC_TIMEOUT_SECONDS,
+                )
+            except grpc.aio.AioRpcError as err:
+                if (
+                    err.code()
+                    in (
+                        grpc.StatusCode.UNAUTHENTICATED,
+                        grpc.StatusCode.PERMISSION_DENIED,
+                    )
+                    and attempt == 0
+                ):
+                    token = await self._async_get_access_token(force_refresh=True)
+                    continue
+                if err.code() in (
+                    grpc.StatusCode.UNAUTHENTICATED,
+                    grpc.StatusCode.PERMISSION_DENIED,
+                ):
+                    raise GoogleWifiFoyerAuthError(
+                        f"Foyer gRPC authentication failed: {err.details()}"
+                    ) from err
+                raise GoogleWifiFoyerConnectionError(
+                    f"Foyer gRPC request failed ({err.code().name}): {err.details()}"
+                ) from err
+            finally:
+                await channel.close()
+
+        raise GoogleWifiFoyerAuthError("Unable to authenticate with Foyer gRPC")
+
+
+def _encode_varint(value: int) -> bytes:
+    """Encode a non-negative protobuf varint."""
+    encoded = bytearray()
+    while value > 0x7F:
+        encoded.append((value & 0x7F) | 0x80)
+        value >>= 7
+    encoded.append(value)
+    return bytes(encoded)
+
+
+def _encode_string_field(field_number: int, value: str) -> bytes:
+    """Encode a length-delimited protobuf string field."""
+    payload = value.encode("utf-8")
+    return (
+        _encode_varint((field_number << 3) | 2) + _encode_varint(len(payload)) + payload
+    )
+
+
+def _decode_varint(data: bytes, offset: int) -> tuple[int, int]:
+    """Decode a protobuf varint and return its value and next offset."""
+    value = 0
+    shift = 0
+    while offset < len(data) and shift < 64:
+        byte = data[offset]
+        offset += 1
+        value |= (byte & 0x7F) << shift
+        if not byte & 0x80:
+            return value, offset
+        shift += 7
+    raise ValueError("Invalid protobuf varint")
+
+
+def _length_delimited_fields(data: bytes, wanted_field: int) -> list[bytes]:
+    """Extract occurrences of one length-delimited protobuf field."""
+    values: list[bytes] = []
+    offset = 0
+    while offset < len(data):
+        tag, offset = _decode_varint(data, offset)
+        field_number = tag >> 3
+        wire_type = tag & 7
+        if wire_type == 0:
+            _, offset = _decode_varint(data, offset)
+            continue
+        if wire_type == 1:
+            offset += 8
+            continue
+        if wire_type == 2:
+            length, offset = _decode_varint(data, offset)
+            end = offset + length
+            if end > len(data):
+                raise ValueError("Invalid protobuf field length")
+            if field_number == wanted_field:
+                values.append(data[offset:end])
+            offset = end
+            continue
+        if wire_type == 5:
+            offset += 4
+            continue
+        raise ValueError(f"Unsupported protobuf wire type: {wire_type}")
+    return values
+
+
+def _first_length_delimited(data: bytes, field_number: int) -> bytes | None:
+    """Return the first occurrence of a length-delimited field."""
+    values = _length_delimited_fields(data, field_number)
+    return values[0] if values else None
+
+
+def _first_string(data: bytes, field_number: int) -> str | None:
+    """Return the first non-empty UTF-8 string field."""
+    value = _first_length_delimited(data, field_number)
+    if not value:
+        return None
+    return value.decode("utf-8")

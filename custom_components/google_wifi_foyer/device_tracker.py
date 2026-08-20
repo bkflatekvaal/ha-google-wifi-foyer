@@ -5,14 +5,15 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from homeassistant.components.device_tracker.entity import ScannerEntity
+from homeassistant.components.device_tracker import ScannerEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.device_registry import format_mac
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.device_registry import DeviceInfo, format_mac
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_GROUP_ID
+from .const import CONF_GROUP_ID, DOMAIN
 from .coordinator import GoogleWifiFoyerCoordinator
 
 
@@ -58,9 +59,9 @@ class GoogleWifiFoyerStationTracker(
     ) -> None:
         super().__init__(coordinator)
         self._station_id = station_id
+        self._group_id = entry.data[CONF_GROUP_ID]
         self._attr_unique_id = f"{entry.data[CONF_GROUP_ID]}_{station_id}"
         self._attr_name = self._station_name
-        self._attr_mac_address = _station_mac(self._station)
 
     @property
     def _station(self) -> dict[str, Any]:
@@ -111,11 +112,32 @@ class GoogleWifiFoyerStationTracker(
         return value if isinstance(value, str) and value else None
 
     @property
+    def mac_address(self) -> str | None:
+        """Return the normalized MAC address reported by sensitive info."""
+        return _station_mac(self._station)
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return the stable station device and its optional MAC connection."""
+        mac_address = self.mac_address
+        connections = (
+            {(dr.CONNECTION_NETWORK_MAC, mac_address)} if mac_address else set()
+        )
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._group_id}_{self._station_id}")},
+            connections=connections,
+            name=self._station_name,
+            manufacturer=_string_or_none(self._station.get("curatedOuiName")),
+            model=_string_or_none(self._station.get("friendlyType")),
+        )
+
+    @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return useful Foyer metadata."""
         station = self._station
         status = station.get("status")
         last_seen = station.get("lastSeen")
+        access_point = self.coordinator.access_points.get(station.get("apId"), {})
 
         attrs: dict[str, Any] = {
             "google_wifi_name": self._station_name,
@@ -127,6 +149,11 @@ class GoogleWifiFoyerStationTracker(
             "station_type": station.get("stationType"),
             "wireless_capability": station.get("wirelessCap"),
             "rx_spatial_streams": station.get("numberOfRxSpatialStream"),
+            "ipv6_addresses": station.get("ipv6Addresses"),
+            "access_point_name": access_point.get("name")
+            or access_point.get("room_name"),
+            "access_point_ip_address": access_point.get("ip_address"),
+            "access_point_room": access_point.get("room_name"),
         }
 
         if isinstance(status, dict):
@@ -144,7 +171,7 @@ def _string_or_none(value: Any) -> str | None:
 
 def _station_mac(station: dict[str, Any]) -> str | None:
     """Return a normalized MAC address when Google provides one."""
-    for key in ("macAddress", "mac", "id"):
+    for key in ("macAddress", "mac"):
         value = station.get(key)
         if not isinstance(value, str):
             continue

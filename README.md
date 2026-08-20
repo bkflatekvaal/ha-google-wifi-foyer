@@ -6,7 +6,7 @@ It uses Google's undocumented `googlehomefoyer-pa.googleapis.com` API and the
 `https://www.googleapis.com/auth/accesspoints` OAuth scope. This may stop working
 without notice if Google changes the private API or authentication flow.
 
-## Current v0.1.1 scope
+## Current v0.1.3 scope
 
 - UI config flow
 - EmbeddedSetup `oauth_token` -> reusable `aas_et` master token
@@ -17,10 +17,15 @@ without notice if Google changes the private API or authentication flow.
 - Online/offline presence
 - IP address and DHCP hostname when provided by Google
 - Connection type (wired/wireless)
+- MAC address through Foyer's optional sensitive-info RPC
+- IPv6 address metadata when returned by sensitive info
 - Wireless band
 - Friendly type/manufacturer metadata
 - Offline `last_seen`
 - Automatic reauthentication flow if the stored master token stops working
+- Create one child device for each access point in the selected Wifi network
+- Show an IP address diagnostic sensor on each access point device
+- Show an access point count/list diagnostic sensor on the Wifi network device
 
 ## Installation
 

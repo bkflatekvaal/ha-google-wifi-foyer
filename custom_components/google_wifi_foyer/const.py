@@ -12,6 +12,7 @@ CONF_GROUP_ID = "group_id"
 CONF_NETWORK_NAME = "network_name"
 
 FOYER_BASE_URL = "https://googlehomefoyer-pa.googleapis.com"
+FOYER_GRPC_TARGET = "googlehomefoyer-pa.googleapis.com:443"
 ACCESSPOINTS_SCOPE = "oauth2:https://www.googleapis.com/auth/accesspoints"
 GOOGLE_HOME_APP = "com.google.android.apps.chromecast.app"
 GOOGLE_HOME_CLIENT_SIG = "24bb24c05e47e0aefa68a58a766179d9b613a600"
@@ -19,4 +20,4 @@ GOOGLE_HOME_CLIENT_SIG = "24bb24c05e47e0aefa68a58a766179d9b613a600"
 DEFAULT_SCAN_INTERVAL = timedelta(seconds=30)
 TOKEN_REFRESH_MARGIN_SECONDS = 300
 
-PLATFORMS = [Platform.DEVICE_TRACKER]
+PLATFORMS = [Platform.DEVICE_TRACKER, Platform.SENSOR]

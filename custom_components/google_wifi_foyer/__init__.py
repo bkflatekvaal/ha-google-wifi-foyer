@@ -35,13 +35,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.runtime_data = coordinator
 
     device_registry = dr.async_get(hass)
-    device_registry.async_get_or_create(
+    network_device = device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, entry.data[CONF_GROUP_ID])},
         name=entry.data[CONF_NETWORK_NAME],
         manufacturer="Google",
         model="Google Wifi network",
     )
+
+    for access_point_id, access_point in coordinator.access_points.items():
+        device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={
+                (DOMAIN, f"{entry.data[CONF_GROUP_ID]}_{access_point_id}")
+            },
+            name=access_point.get("name")
+            or access_point.get("room_name")
+            or "Google Wifi access point",
+            manufacturer=access_point.get("manufacturer") or "Google",
+            model=access_point.get("model") or "Google Wifi access point",
+            serial_number=access_point.get("serial_number"),
+            sw_version=access_point.get("firmware_version"),
+            via_device_id=network_device.id,
+        )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
