@@ -20,9 +20,11 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up Family Wi-Fi pause sensors."""
+    """Set up guest-network and Family Wi-Fi sensors."""
     coordinator: GoogleWifiFoyerCoordinator = entry.runtime_data
     known_ids: set[str] = set()
+
+    async_add_entities([GoogleWifiFoyerGuestNetworkSensor(coordinator, entry)])
 
     @callback
     def _add_new_entities() -> None:
@@ -37,6 +39,49 @@ async def async_setup_entry(
 
     _add_new_entities()
     entry.async_on_unload(coordinator.async_add_listener(_add_new_entities))
+
+
+class GoogleWifiFoyerGuestNetworkSensor(
+    CoordinatorEntity[GoogleWifiFoyerCoordinator], BinarySensorEntity
+):
+    """Show whether the guest Wi-Fi network is enabled."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:wifi-star"
+    _attr_name = "Guest network"
+
+    def __init__(
+        self,
+        coordinator: GoogleWifiFoyerCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator)
+        self._group_id = entry.data[CONF_GROUP_ID]
+        self._attr_unique_id = f"{self._group_id}_guest_network"
+
+    @property
+    def available(self) -> bool:
+        """Return whether Google supplied guest-network settings."""
+        return super().available and self.coordinator.guest_network is not None
+
+    @property
+    def is_on(self) -> bool:
+        """Return whether the guest network is enabled."""
+        guest = self.coordinator.guest_network
+        return isinstance(guest, dict) and guest.get("enabled") is True
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the guest SSID without exposing its shared key."""
+        guest = self.coordinator.guest_network
+        if not isinstance(guest, dict) or guest.get("ssid") is None:
+            return {}
+        return {"ssid": guest["ssid"]}
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Attach this entity to the main Wifi network device."""
+        return DeviceInfo(identifiers={(DOMAIN, self._group_id)})
 
 
 class GoogleWifiFoyerFamilyPausedSensor(

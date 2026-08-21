@@ -44,6 +44,7 @@ class GoogleWifiFoyerCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self.family_groups: dict[str, dict[str, Any]] = {}
         self.station_policies: dict[str, dict[str, Any]] = {}
         self.prioritized_station: dict[str, Any] | None = None
+        self.guest_network: dict[str, Any] | None = None
         self._sensitive_info: dict[str, dict[str, Any]] = {}
         self._sensitive_info_attempted: set[str] = set()
 
@@ -68,6 +69,7 @@ class GoogleWifiFoyerCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 }
             self.family_groups, self.station_policies = _safe_family_wifi(group)
             self.prioritized_station = _safe_prioritized_station(group)
+            self.guest_network = _safe_guest_network(group)
 
             local_status_results = await asyncio.gather(
                 *(
@@ -265,6 +267,25 @@ def _safe_prioritized_station(group: dict[str, Any]) -> dict[str, Any] | None:
         "station_id": station_id,
         "ends_at": _string_value(priority, "prioritizationEndTime"),
     }
+
+
+def _safe_guest_network(group: dict[str, Any]) -> dict[str, Any] | None:
+    """Extract the non-secret guest Wi-Fi settings."""
+    settings = group.get("groupSettings")
+    wlan = settings.get("wlanSettings") if isinstance(settings, dict) else None
+    if not isinstance(wlan, dict):
+        return None
+
+    ssid = _string_value(wlan, "guestSsid")
+    enabled = next(
+        (
+            wlan[key]
+            for key in ("guestNetworkEnabled", "guestEnabled")
+            if isinstance(wlan.get(key), bool)
+        ),
+        bool(ssid),
+    )
+    return {"enabled": enabled, "ssid": ssid}
 
 
 def _dict_items(data: dict[str, Any], key: str) -> list[dict[str, Any]]:
