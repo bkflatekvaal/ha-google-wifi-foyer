@@ -17,6 +17,7 @@ from .coordinator import (
     GoogleWifiFoyerCoordinator,
     blocking_policy_is_active,
     prioritized_station_is_active,
+    station_is_guest,
 )
 
 
@@ -152,6 +153,9 @@ class GoogleWifiFoyerStationTracker(
             and prioritized_station_is_active(priority)
             and priority.get("station_id") == self._station_id
         )
+        static_ip_address = self.coordinator.dhcp_reservations.get(
+            self._station_id
+        ) or _string_or_none(station.get("staticIpAddress"))
 
         attrs: dict[str, Any] = {
             "google_wifi_name": self._station_name,
@@ -171,6 +175,8 @@ class GoogleWifiFoyerStationTracker(
             "family_groups": [family["name"] for family in family_groups],
             "internet_paused": active_policy is not None,
             "prioritized": is_prioritized,
+            "guest_network": station_is_guest(station),
+            "static_ip_address": static_ip_address,
         }
 
         if isinstance(active_policy, dict):

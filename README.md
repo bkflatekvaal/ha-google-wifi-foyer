@@ -6,7 +6,7 @@ It uses Google's undocumented `googlehomefoyer-pa.googleapis.com` API and the
 `https://www.googleapis.com/auth/accesspoints` OAuth scope. This may stop working
 without notice if Google changes the private API or authentication flow.
 
-## Current v0.3.2 scope
+## Current v0.3.3 scope
 
 - UI config flow
 - EmbeddedSetup `oauth_token` -> reusable `aas_et` master token
@@ -31,7 +31,8 @@ without notice if Google changes the private API or authentication flow.
 - Show total connected-client and access-point count/list sensors on the network
 - Show Family Wi-Fi connected-client, pause, filtering, and schedule information
 - Show the currently prioritized device and prioritization expiry
-- Show whether the guest network is enabled, with its SSID as an attribute
+- Show main and guest SSIDs, guest-network state, and connected guest clients
+- Show DHCP-reserved static IP addresses on device trackers
 
 ## Installation
 

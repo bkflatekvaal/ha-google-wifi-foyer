@@ -25,6 +25,7 @@ from .coordinator import (
     GoogleWifiFoyerCoordinator,
     access_point_display_name,
     prioritized_station_is_active,
+    station_is_guest,
 )
 
 
@@ -134,7 +135,10 @@ async def async_setup_entry(
 
     entities: list[SensorEntity] = [
         GoogleWifiFoyerAccessPointsSensor(coordinator, entry),
+        GoogleWifiFoyerSsidSensor(coordinator, entry, guest=False),
+        GoogleWifiFoyerSsidSensor(coordinator, entry, guest=True),
         GoogleWifiFoyerTotalConnectedClientsSensor(coordinator, entry),
+        GoogleWifiFoyerGuestConnectedClientsSensor(hass, coordinator, entry),
         GoogleWifiFoyerPrioritizedDeviceSensor(hass, coordinator, entry),
     ]
     entities.extend(
@@ -371,6 +375,113 @@ class GoogleWifiFoyerTotalConnectedClientsSensor(
     @property
     def device_info(self) -> DeviceInfo:
         """Attach this sensor to the Wifi group device."""
+        return DeviceInfo(identifiers={(DOMAIN, self._group_id)})
+
+
+class GoogleWifiFoyerSsidSensor(
+    CoordinatorEntity[GoogleWifiFoyerCoordinator], SensorEntity
+):
+    """Show the SSID of the main or guest wireless network."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:wifi"
+
+    def __init__(
+        self,
+        coordinator: GoogleWifiFoyerCoordinator,
+        entry: ConfigEntry,
+        *,
+        guest: bool,
+    ) -> None:
+        super().__init__(coordinator)
+        self._group_id = entry.data[CONF_GROUP_ID]
+        self._guest = guest
+        kind = "guest" if guest else "main"
+        self._attr_name = f"{kind.capitalize()} SSID"
+        self._attr_unique_id = f"{self._group_id}_{kind}_ssid"
+
+    @property
+    def _network(self) -> dict[str, Any] | None:
+        return (
+            self.coordinator.guest_network
+            if self._guest
+            else self.coordinator.main_network
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return whether Google supplied this wireless network's SSID."""
+        return super().available and isinstance(self._network, dict)
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the SSID."""
+        network = self._network
+        return network.get("ssid") if isinstance(network, dict) else None
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Attach this entity to the main Wifi network device."""
+        return DeviceInfo(identifiers={(DOMAIN, self._group_id)})
+
+
+class GoogleWifiFoyerGuestConnectedClientsSensor(
+    CoordinatorEntity[GoogleWifiFoyerCoordinator], SensorEntity
+):
+    """Show clients currently connected to the guest network."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:account-multiple-outline"
+    _attr_name = "Guest connected clients"
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        coordinator: GoogleWifiFoyerCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator)
+        self._entity_registry = er.async_get(hass)
+        self._group_id = entry.data[CONF_GROUP_ID]
+        self._attr_unique_id = f"{self._group_id}_guest_connected_clients"
+
+    @property
+    def _connected_stations(self) -> list[tuple[str, dict[str, Any]]]:
+        return sorted(
+            (
+                (station_id, station)
+                for station_id, station in self.coordinator.data.items()
+                if station.get("connected") is True and station_is_guest(station)
+            ),
+            key=lambda item: _station_name(item[1]).casefold(),
+        )
+
+    @property
+    def native_value(self) -> int:
+        """Return the number of connected guest clients."""
+        return len(self._connected_stations)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the connected guest clients."""
+        return {
+            "clients": [
+                {
+                    "station_id": station_id,
+                    "name": _station_name(station),
+                    "entity_id": self._entity_registry.async_get_entity_id(
+                        "device_tracker", DOMAIN, f"{self._group_id}_{station_id}"
+                    ),
+                    "ip_address": _station_ip(station),
+                }
+                for station_id, station in self._connected_stations
+            ]
+        }
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Attach this entity to the main Wifi network device."""
         return DeviceInfo(identifiers={(DOMAIN, self._group_id)})
 
 

@@ -44,7 +44,9 @@ class GoogleWifiFoyerCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self.family_groups: dict[str, dict[str, Any]] = {}
         self.station_policies: dict[str, dict[str, Any]] = {}
         self.prioritized_station: dict[str, Any] | None = None
+        self.main_network: dict[str, Any] | None = None
         self.guest_network: dict[str, Any] | None = None
+        self.dhcp_reservations: dict[str, str] = {}
         self._sensitive_info: dict[str, dict[str, Any]] = {}
         self._sensitive_info_attempted: set[str] = set()
 
@@ -69,7 +71,8 @@ class GoogleWifiFoyerCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 }
             self.family_groups, self.station_policies = _safe_family_wifi(group)
             self.prioritized_station = _safe_prioritized_station(group)
-            self.guest_network = _safe_guest_network(group)
+            self.main_network, self.guest_network = _safe_wireless_networks(group)
+            self.dhcp_reservations = _safe_dhcp_reservations(group)
 
             local_status_results = await asyncio.gather(
                 *(
@@ -269,23 +272,91 @@ def _safe_prioritized_station(group: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def _safe_guest_network(group: dict[str, Any]) -> dict[str, Any] | None:
-    """Extract the non-secret guest Wi-Fi settings."""
+def _safe_wireless_networks(
+    group: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Extract the non-secret main and guest Wi-Fi settings."""
     settings = group.get("groupSettings")
-    wlan = settings.get("wlanSettings") if isinstance(settings, dict) else None
-    if not isinstance(wlan, dict):
-        return None
+    if not isinstance(settings, dict):
+        return None, None
 
-    ssid = _string_value(wlan, "guestSsid")
-    enabled = next(
+    wlan = settings.get("wlanSettings")
+    wireless = settings.get("wirelessSettings")
+    guest = settings.get("guestWirelessSettings")
+    main_ssid = _string_value(wireless, "ssid") or _string_value(
+        wlan, "privateSsid"
+    )
+    main = {"ssid": main_ssid} if main_ssid is not None else None
+
+    if isinstance(guest, dict):
+        guest_ssid = _string_value(guest, "ssid")
+        enabled_value = guest.get("enabled")
+        guest_enabled = (
+            enabled_value if isinstance(enabled_value, bool) else bool(guest_ssid)
+        )
+        return main, {"enabled": guest_enabled, "ssid": guest_ssid}
+
+    if not isinstance(wlan, dict):
+        return main, None
+    guest_ssid = _string_value(wlan, "guestSsid")
+    guest_enabled = next(
         (
             wlan[key]
             for key in ("guestNetworkEnabled", "guestEnabled")
             if isinstance(wlan.get(key), bool)
         ),
-        bool(ssid),
+        bool(guest_ssid),
     )
-    return {"enabled": enabled, "ssid": ssid}
+    return main, {"enabled": guest_enabled, "ssid": guest_ssid}
+
+
+def _safe_dhcp_reservations(group: dict[str, Any]) -> dict[str, str]:
+    """Return DHCP reservations keyed by station ID."""
+    settings = group.get("groupSettings")
+    if not isinstance(settings, dict):
+        return {}
+
+    reservations: dict[str, str] = {}
+    containers = [
+        value
+        for key in ("lanSettings", "dhcpSettings")
+        if isinstance((value := settings.get(key)), dict)
+    ]
+    reservation_items = [
+        reservation
+        for container in containers
+        for key in ("dhcpReservations", "staticIpMappings")
+        for reservation in _dict_items(container, key)
+    ]
+    for reservation in reservation_items:
+        station_id = _string_value(reservation, "stationId")
+        ip_address = _string_value(reservation, "ipAddress") or _string_value(
+            reservation, "reservedIpAddress"
+        )
+        if station_id is not None and ip_address is not None:
+            reservations[station_id] = ip_address
+    return reservations
+
+
+def station_is_guest(station: dict[str, Any]) -> bool:
+    """Return whether Foyer identifies a station as a guest client."""
+    for key in (
+        "connectedToGuestNetwork",
+        "isGuest",
+        "isGuestNetwork",
+        "guest",
+        "guestNetwork",
+        "onGuestNetwork",
+    ):
+        value = station.get(key)
+        if isinstance(value, bool):
+            return value
+
+    for key in ("networkType", "wirelessNetworkType", "network"):
+        value = station.get(key)
+        if isinstance(value, str):
+            return value.casefold() in {"guest", "guest_network", "guestnetwork"}
+    return False
 
 
 def _dict_items(data: dict[str, Any], key: str) -> list[dict[str, Any]]:
