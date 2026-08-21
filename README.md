@@ -6,7 +6,7 @@ It uses Google's undocumented `googlehomefoyer-pa.googleapis.com` API and the
 `https://www.googleapis.com/auth/accesspoints` OAuth scope. This may stop working
 without notice if Google changes the private API or authentication flow.
 
-## Current v0.2.2 scope
+## Current v0.3.1 scope
 
 - UI config flow
 - EmbeddedSetup `oauth_token` -> reusable `aas_et` master token
@@ -25,10 +25,12 @@ without notice if Google changes the private API or authentication flow.
 - Automatic reauthentication flow if the stored master token stops working
 - Create one child device for each access point, named with its room
 - Show an IP address diagnostic sensor on each access point device
-- Show local firmware, update, uptime, restart, WAN IP, and status diagnostics
-  from each access point's `/api/v1/status` endpoint
+- Show local firmware, update, uptime, restart, and status diagnostics from each
+  access point's `/api/v1/status` endpoint, plus WAN IP on the primary router
 - Show a connected-client count and structured client list on each access point
-- Show an access point count/list diagnostic sensor on the Wifi network device
+- Show total connected-client and access-point count/list sensors on the network
+- Show Family Wi-Fi connected-client, pause, filtering, and schedule information
+- Show the currently prioritized device and prioritization expiry
 
 ## Installation
 

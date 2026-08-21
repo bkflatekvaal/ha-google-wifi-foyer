@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 import logging
 from typing import Any
 
@@ -40,7 +41,9 @@ class GoogleWifiFoyerCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self.api = api
         self.entry = entry
         self.access_points: dict[str, dict[str, Any]] = {}
-        self._access_points_loaded = False
+        self.family_groups: dict[str, dict[str, Any]] = {}
+        self.station_policies: dict[str, dict[str, Any]] = {}
+        self.prioritized_station: dict[str, Any] | None = None
         self._sensitive_info: dict[str, dict[str, Any]] = {}
         self._sensitive_info_attempted: set[str] = set()
 
@@ -49,22 +52,22 @@ class GoogleWifiFoyerCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         try:
             stations = await self.api.async_get_stations(group_id)
-            if not self._access_points_loaded:
-                group = await self.api.async_get_group(group_id)
-                if group is None:
-                    raise GoogleWifiFoyerConnectionError(
-                        "The configured Google Wifi network was not returned"
-                    )
-                access_points = group.get("accessPoints", [])
-                if isinstance(access_points, list):
-                    self.access_points = {
-                        access_point["id"]: _safe_access_point(access_point)
-                        for access_point in access_points
-                        if isinstance(access_point, dict)
-                        and isinstance(access_point.get("id"), str)
-                        and access_point["id"]
-                    }
-                self._access_points_loaded = True
+            group = await self.api.async_get_group(group_id)
+            if group is None:
+                raise GoogleWifiFoyerConnectionError(
+                    "The configured Google Wifi network was not returned"
+                )
+            access_points = group.get("accessPoints", [])
+            if isinstance(access_points, list):
+                self.access_points = {
+                    access_point["id"]: _safe_access_point(access_point)
+                    for access_point in access_points
+                    if isinstance(access_point, dict)
+                    and isinstance(access_point.get("id"), str)
+                    and access_point["id"]
+                }
+            self.family_groups, self.station_policies = _safe_family_wifi(group)
+            self.prioritized_station = _safe_prioritized_station(group)
 
             local_status_results = await asyncio.gather(
                 *(
@@ -167,10 +170,156 @@ def _safe_access_point(access_point: dict[str, Any]) -> dict[str, Any]:
         "model": _string_value(properties, "hardwareType"),
         "serial_number": _string_value(properties, "serialNumber"),
         "operating_mode": _string_value(properties, "operatingMode"),
+        "is_group_root": properties.get("isGroupRoot")
+        if isinstance(properties.get("isGroupRoot"), bool)
+        else None,
         "is_bridged": properties.get("isBridged")
         if isinstance(properties.get("isBridged"), bool)
         else None,
     }
+
+
+def _safe_family_wifi(
+    group: dict[str, Any],
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    """Extract an allowlisted view of Family Wi-Fi settings."""
+    settings = group.get("groupSettings")
+    if not isinstance(settings, dict):
+        return {}, {}
+    station_sets = settings.get("stationSets")
+    family_settings = settings.get("familyHubSettings")
+    if not isinstance(station_sets, list) or not isinstance(family_settings, dict):
+        return {}, {}
+
+    family_groups: dict[str, dict[str, Any]] = {}
+    for station_set in station_sets:
+        if not isinstance(station_set, dict):
+            continue
+        station_set_id = _string_value(station_set, "id")
+        if station_set_id is None:
+            continue
+        members = station_set.get("members")
+        member_ids = (
+            [
+                station_id
+                for member in members
+                if isinstance(member, dict)
+                if (station_id := _string_value(member, "stationId")) is not None
+            ]
+            if isinstance(members, list)
+            else []
+        )
+        family_groups[station_set_id] = {
+            "id": station_set_id,
+            "name": _string_value(station_set, "name") or "Family group",
+            "member_ids": member_ids,
+            "blocking_policy": None,
+            "content_filter": None,
+            "schedules": [],
+        }
+
+    for policy in _dict_items(family_settings, "stationSetPolicies"):
+        station_set_id = _string_value(policy, "stationSetId")
+        if station_set_id in family_groups:
+            family_groups[station_set_id]["blocking_policy"] = _safe_blocking_policy(
+                policy.get("blockingPolicy")
+            )
+
+    for policy in _dict_items(family_settings, "contentFilteringPolicies"):
+        mode = _string_value(policy, "safeFilteringMode")
+        for station_set_id in _string_items(policy, "stationSetIds"):
+            if station_set_id in family_groups:
+                family_groups[station_set_id]["content_filter"] = mode
+
+    for schedule in _dict_items(family_settings, "blockingSchedules"):
+        safe_schedule = _safe_schedule(schedule)
+        for station_set_id in _string_items(schedule, "stationSetIds"):
+            if station_set_id in family_groups:
+                family_groups[station_set_id]["schedules"].append(safe_schedule)
+
+    station_policies = {
+        station_id: blocking_policy
+        for policy in _dict_items(family_settings, "stationPolicies")
+        if (station_id := _string_value(policy, "stationId")) is not None
+        if (blocking_policy := _safe_blocking_policy(policy.get("blockingPolicy")))
+        is not None
+    }
+    return family_groups, station_policies
+
+
+def _safe_prioritized_station(group: dict[str, Any]) -> dict[str, Any] | None:
+    """Extract the active prioritized-station fields."""
+    settings = group.get("groupSettings")
+    lan_settings = settings.get("lanSettings") if isinstance(settings, dict) else None
+    priority = (
+        lan_settings.get("prioritizedStation")
+        if isinstance(lan_settings, dict)
+        else None
+    )
+    if not isinstance(priority, dict):
+        return None
+    station_id = _string_value(priority, "stationId")
+    if station_id is None:
+        return None
+    return {
+        "station_id": station_id,
+        "ends_at": _string_value(priority, "prioritizationEndTime"),
+    }
+
+
+def _dict_items(data: dict[str, Any], key: str) -> list[dict[str, Any]]:
+    value = data.get(key)
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _string_items(data: dict[str, Any], key: str) -> list[str]:
+    value = data.get(key)
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str) and item]
+
+
+def _safe_blocking_policy(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    return {
+        "creation_timestamp": _string_value(value, "creationTimestamp"),
+        "expiry_timestamp": _string_value(value, "expiryTimestamp"),
+    }
+
+
+def _safe_schedule(value: dict[str, Any]) -> dict[str, Any]:
+    schedule = value.get("schedule")
+    if not isinstance(schedule, dict):
+        schedule = {}
+    durations = []
+    for duration in _dict_items(schedule, "scheduleDurations"):
+        start = duration.get("startTime")
+        end = duration.get("endTime")
+        durations.append({
+            "start_day": _string_value(duration, "startDay"),
+            "start_time": _safe_clock(start),
+            "end_day": _string_value(duration, "endDay"),
+            "end_time": _safe_clock(end),
+        })
+    return {
+        "id": _string_value(value, "id"),
+        "name": _string_value(schedule, "name"),
+        "time_zone": _string_value(schedule, "timeZoneId"),
+        "durations": durations,
+    }
+
+
+def _safe_clock(value: Any) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    hours = value.get("hours")
+    minutes = value.get("minutes", 0)
+    if not isinstance(hours, int) or not isinstance(minutes, int):
+        return None
+    return f"{hours:02d}:{minutes:02d}"
 
 
 def _string_value(data: Any, key: str) -> str | None:
@@ -197,3 +346,35 @@ def access_point_display_name(access_point: dict[str, Any]) -> str:
     if isinstance(room_name, str) and room_name:
         return room_name
     return "Google Wifi access point"
+
+
+def blocking_policy_is_active(policy: Any) -> bool:
+    """Return whether a Family Wi-Fi blocking policy is currently active."""
+    if not isinstance(policy, dict):
+        return False
+    expiry = policy.get("expiry_timestamp")
+    if not isinstance(expiry, str) or not expiry:
+        return True
+    try:
+        expiry_time = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if expiry_time.tzinfo is None:
+        expiry_time = expiry_time.replace(tzinfo=UTC)
+    return expiry_time > datetime.now(UTC)
+
+
+def prioritized_station_is_active(priority: Any) -> bool:
+    """Return whether a prioritized-station selection is still active."""
+    if not isinstance(priority, dict) or not priority.get("station_id"):
+        return False
+    ends_at = priority.get("ends_at")
+    if not isinstance(ends_at, str) or not ends_at:
+        return True
+    try:
+        end_time = datetime.fromisoformat(ends_at.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if end_time.tzinfo is None:
+        end_time = end_time.replace(tzinfo=UTC)
+    return end_time > datetime.now(UTC)

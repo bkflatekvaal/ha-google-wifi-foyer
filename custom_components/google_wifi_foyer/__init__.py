@@ -36,6 +36,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.runtime_data = coordinator
 
     _migrate_duplicated_tracker_entity_ids(hass, entry)
+    _remove_deleted_family_entities(hass, entry, coordinator)
 
     device_registry = dr.async_get(hass)
     network_device = device_registry.async_get_or_create(
@@ -107,3 +108,28 @@ def _migrate_duplicated_tracker_entity_ids(
         entity_registry.async_update_entity(
             registry_entry.entity_id, new_entity_id=new_entity_id
         )
+
+
+def _remove_deleted_family_entities(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: GoogleWifiFoyerCoordinator,
+) -> None:
+    """Remove entities belonging to Family Wi-Fi groups deleted in Google Home."""
+    entity_registry = er.async_get(hass)
+    group_id = entry.data[CONF_GROUP_ID]
+    valid_unique_ids = {
+        f"{group_id}_family_{family_id}_{suffix}"
+        for family_id in coordinator.family_groups
+        for suffix in ("paused", "connected_clients", "content_filter")
+    }
+    family_prefix = f"{group_id}_family_"
+
+    for registry_entry in list(entity_registry.entities.values()):
+        if (
+            registry_entry.config_entry_id == entry.entry_id
+            and registry_entry.platform == DOMAIN
+            and registry_entry.unique_id.startswith(family_prefix)
+            and registry_entry.unique_id not in valid_unique_ids
+        ):
+            entity_registry.async_remove(registry_entry.entity_id)

@@ -14,14 +14,18 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory, UnitOfTime
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_GROUP_ID, DOMAIN
-from .coordinator import GoogleWifiFoyerCoordinator, access_point_display_name
+from .coordinator import (
+    GoogleWifiFoyerCoordinator,
+    access_point_display_name,
+    prioritized_station_is_active,
+)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -131,6 +135,7 @@ async def async_setup_entry(
     entities: list[SensorEntity] = [
         GoogleWifiFoyerAccessPointsSensor(coordinator, entry),
         GoogleWifiFoyerTotalConnectedClientsSensor(coordinator, entry),
+        GoogleWifiFoyerPrioritizedDeviceSensor(hass, coordinator, entry),
     ]
     entities.extend(
         GoogleWifiFoyerAccessPointIpSensor(
@@ -153,11 +158,48 @@ async def async_setup_entry(
         if description.key != "local_ip"
         or _is_router(coordinator.access_points[access_point_id])
     )
+    entities.extend(
+        family_entity
+        for family_id in sorted(coordinator.family_groups)
+        for family_entity in (
+            GoogleWifiFoyerFamilyConnectedClientsSensor(
+                hass, coordinator, entry, family_id
+            ),
+            GoogleWifiFoyerFamilyContentFilterSensor(
+                coordinator, entry, family_id
+            ),
+        )
+    )
     async_add_entities(entities)
+
+    known_family_ids = set(coordinator.family_groups)
+
+    @callback
+    def _add_new_family_entities() -> None:
+        new_ids = set(coordinator.family_groups) - known_family_ids
+        if not new_ids:
+            return
+        async_add_entities(
+            family_entity
+            for family_id in sorted(new_ids)
+            for family_entity in (
+                GoogleWifiFoyerFamilyConnectedClientsSensor(
+                    hass, coordinator, entry, family_id
+                ),
+                GoogleWifiFoyerFamilyContentFilterSensor(
+                    coordinator, entry, family_id
+                ),
+            )
+        )
+        known_family_ids.update(new_ids)
+
+    entry.async_on_unload(coordinator.async_add_listener(_add_new_family_entities))
 
 
 def _is_router(access_point: dict[str, Any]) -> bool:
     """Return whether an access point is the network's primary router."""
+    if access_point.get("is_group_root") is True:
+        return True
     if access_point.get("is_bridged") is False:
         return True
 
@@ -332,6 +374,62 @@ class GoogleWifiFoyerTotalConnectedClientsSensor(
         return DeviceInfo(identifiers={(DOMAIN, self._group_id)})
 
 
+class GoogleWifiFoyerPrioritizedDeviceSensor(
+    CoordinatorEntity[GoogleWifiFoyerCoordinator], SensorEntity
+):
+    """Show the one device currently prioritized on the Wifi network."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:priority-high"
+    _attr_name = "Prioritized device"
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        coordinator: GoogleWifiFoyerCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator)
+        self._entity_registry = er.async_get(hass)
+        self._group_id = entry.data[CONF_GROUP_ID]
+        self._attr_unique_id = f"{self._group_id}_prioritized_device"
+
+    @property
+    def _active_priority(self) -> dict[str, Any] | None:
+        priority = self.coordinator.prioritized_station
+        return priority if prioritized_station_is_active(priority) else None
+
+    @property
+    def native_value(self) -> str:
+        """Return the prioritized station's current friendly name."""
+        priority = self._active_priority
+        if priority is None:
+            return "None"
+        station = self.coordinator.data.get(priority["station_id"], {})
+        return _station_name(station)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the prioritized tracker and expiry time."""
+        priority = self._active_priority
+        if priority is None:
+            return {}
+        station_id = priority["station_id"]
+        unique_id = f"{self._group_id}_{station_id}"
+        return {
+            "station_id": station_id,
+            "entity_id": self._entity_registry.async_get_entity_id(
+                "device_tracker", DOMAIN, unique_id
+            ),
+            "prioritization_ends_at": priority.get("ends_at"),
+        }
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Attach this sensor to the main Wifi network device."""
+        return DeviceInfo(identifiers={(DOMAIN, self._group_id)})
+
+
 class GoogleWifiFoyerLocalStatusSensor(
     CoordinatorEntity[GoogleWifiFoyerCoordinator], SensorEntity
 ):
@@ -462,6 +560,128 @@ class GoogleWifiFoyerConnectedClientsSensor(
                 )
             }
         )
+
+
+class GoogleWifiFoyerFamilyConnectedClientsSensor(
+    CoordinatorEntity[GoogleWifiFoyerCoordinator], SensorEntity
+):
+    """Count connected clients in one Family Wi-Fi group."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:account-group"
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        coordinator: GoogleWifiFoyerCoordinator,
+        entry: ConfigEntry,
+        family_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._entity_registry = er.async_get(hass)
+        self._group_id = entry.data[CONF_GROUP_ID]
+        self._family_id = family_id
+        self._attr_unique_id = (
+            f"{self._group_id}_family_{family_id}_connected_clients"
+        )
+
+    @property
+    def _family(self) -> dict[str, Any]:
+        return self.coordinator.family_groups.get(self._family_id, {})
+
+    @property
+    def name(self) -> str:
+        """Return the current Google Home family-group name."""
+        return f"{self._family.get('name', 'Family group')} connected clients"
+
+    @property
+    def available(self) -> bool:
+        """Return whether the family group still exists."""
+        return super().available and self._family_id in self.coordinator.family_groups
+
+    @property
+    def native_value(self) -> int:
+        """Return the number of connected members."""
+        return sum(
+            self.coordinator.data.get(station_id, {}).get("connected") is True
+            for station_id in self._family.get("member_ids", [])
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return family membership using safe names and entity IDs."""
+        members = []
+        for station_id in self._family.get("member_ids", []):
+            station = self.coordinator.data.get(station_id, {})
+            unique_id = f"{self._group_id}_{station_id}"
+            members.append(
+                {
+                    "name": _station_name(station),
+                    "entity_id": self._entity_registry.async_get_entity_id(
+                        "device_tracker", DOMAIN, unique_id
+                    ),
+                    "connected": station.get("connected") is True,
+                }
+            )
+        return {
+            "family_group_id": self._family_id,
+            "member_count": len(self._family.get("member_ids", [])),
+            "members": members,
+        }
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Attach this entity to the main Wifi network device."""
+        return DeviceInfo(identifiers={(DOMAIN, self._group_id)})
+
+
+class GoogleWifiFoyerFamilyContentFilterSensor(
+    CoordinatorEntity[GoogleWifiFoyerCoordinator], SensorEntity
+):
+    """Show the content-filtering mode for one Family Wi-Fi group."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:shield-check"
+
+    def __init__(
+        self,
+        coordinator: GoogleWifiFoyerCoordinator,
+        entry: ConfigEntry,
+        family_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._group_id = entry.data[CONF_GROUP_ID]
+        self._family_id = family_id
+        self._attr_unique_id = f"{self._group_id}_family_{family_id}_content_filter"
+
+    @property
+    def _family(self) -> dict[str, Any]:
+        return self.coordinator.family_groups.get(self._family_id, {})
+
+    @property
+    def name(self) -> str:
+        """Return the current Google Home family-group name."""
+        return f"{self._family.get('name', 'Family group')} content filter"
+
+    @property
+    def available(self) -> bool:
+        """Return whether the group and filtering mode are available."""
+        return (
+            super().available
+            and self._family_id in self.coordinator.family_groups
+            and self._family.get("content_filter") is not None
+        )
+
+    @property
+    def native_value(self) -> str | None:
+        """Return Google's content-filtering mode."""
+        return self._family.get("content_filter")
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Attach this entity to the main Wifi network device."""
+        return DeviceInfo(identifiers={(DOMAIN, self._group_id)})
 
 
 def _station_name(station: dict[str, Any]) -> str:

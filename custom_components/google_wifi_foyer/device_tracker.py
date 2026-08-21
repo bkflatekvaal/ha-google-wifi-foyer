@@ -13,7 +13,11 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_GROUP_ID
-from .coordinator import GoogleWifiFoyerCoordinator
+from .coordinator import (
+    GoogleWifiFoyerCoordinator,
+    blocking_policy_is_active,
+    prioritized_station_is_active,
+)
 
 
 async def async_setup_entry(
@@ -123,6 +127,31 @@ class GoogleWifiFoyerStationTracker(
         status = station.get("status")
         last_seen = station.get("lastSeen")
         access_point = self.coordinator.access_points.get(station.get("apId"), {})
+        family_groups = [
+            family
+            for family in self.coordinator.family_groups.values()
+            if self._station_id in family.get("member_ids", [])
+        ]
+        station_policy = self.coordinator.station_policies.get(self._station_id)
+        active_family_policy = next(
+            (
+                family.get("blocking_policy")
+                for family in family_groups
+                if blocking_policy_is_active(family.get("blocking_policy"))
+            ),
+            None,
+        )
+        active_policy = (
+            station_policy
+            if blocking_policy_is_active(station_policy)
+            else active_family_policy
+        )
+        priority = self.coordinator.prioritized_station
+        is_prioritized = (
+            isinstance(priority, dict)
+            and prioritized_station_is_active(priority)
+            and priority.get("station_id") == self._station_id
+        )
 
         attrs: dict[str, Any] = {
             "google_wifi_name": self._station_name,
@@ -139,7 +168,15 @@ class GoogleWifiFoyerStationTracker(
             or access_point.get("room_name"),
             "access_point_ip_address": access_point.get("ip_address"),
             "access_point_room": access_point.get("room_name"),
+            "family_groups": [family["name"] for family in family_groups],
+            "internet_paused": active_policy is not None,
+            "prioritized": is_prioritized,
         }
+
+        if isinstance(active_policy, dict):
+            attrs["pause_expires_at"] = active_policy.get("expiry_timestamp")
+        if is_prioritized and isinstance(priority, dict):
+            attrs["prioritization_ends_at"] = priority.get("ends_at")
 
         if isinstance(status, dict):
             attrs["foyer_status"] = status.get("type")
