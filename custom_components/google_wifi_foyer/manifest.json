@@ -5,13 +5,13 @@
     "@bkflatekvaal"
   ],
   "config_flow": true,
-  "documentation": "https://github.com/bkflatekvaal/google_wifi_foyer",
-  "issue_tracker": "https://github.com/bkflatekvaal/google_wifi_foyer/issues",
+  "documentation": "https://github.com/bkflatekvaal/ha-google-wifi-foyer",
+  "issue_tracker": "https://github.com/bkflatekvaal/ha-google-wifi-foyer/issues",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
   "requirements": [
     "gpsoauth==2.0.0",
     "grpcio==1.78.0"
   ],
-  "version": "0.2.1"
+  "version": "0.2.2"
 }

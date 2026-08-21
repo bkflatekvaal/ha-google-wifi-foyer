@@ -104,7 +104,7 @@ LOCAL_SENSOR_DESCRIPTIONS = (
     ),
     GoogleWifiFoyerLocalSensorDescription(
         key="local_ip",
-        name="Local IP",
+        name="WAN IP",
         icon="mdi:access-point-network",
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_wan_ip,
@@ -126,8 +126,11 @@ async def async_setup_entry(
 ) -> None:
     """Set up access point diagnostic sensors."""
     coordinator: GoogleWifiFoyerCoordinator = entry.runtime_data
+    _remove_obsolete_ap_wan_ip_entities(hass, coordinator, entry)
+
     entities: list[SensorEntity] = [
-        GoogleWifiFoyerAccessPointsSensor(coordinator, entry)
+        GoogleWifiFoyerAccessPointsSensor(coordinator, entry),
+        GoogleWifiFoyerTotalConnectedClientsSensor(coordinator, entry),
     ]
     entities.extend(
         GoogleWifiFoyerAccessPointIpSensor(
@@ -147,8 +150,47 @@ async def async_setup_entry(
         )
         for access_point_id in sorted(coordinator.access_points)
         for description in LOCAL_SENSOR_DESCRIPTIONS
+        if description.key != "local_ip"
+        or _is_router(coordinator.access_points[access_point_id])
     )
     async_add_entities(entities)
+
+
+def _is_router(access_point: dict[str, Any]) -> bool:
+    """Return whether an access point is the network's primary router."""
+    if access_point.get("is_bridged") is False:
+        return True
+
+    operating_mode = access_point.get("operating_mode")
+    if isinstance(operating_mode, str) and "nat" in operating_mode.casefold():
+        return True
+
+    local_status = access_point.get("local_status")
+    return (
+        isinstance(local_status, dict)
+        and _wan_ip(local_status) is not None
+        and _wan_ip(local_status) != access_point.get("ip_address")
+    )
+
+
+def _remove_obsolete_ap_wan_ip_entities(
+    hass: HomeAssistant,
+    coordinator: GoogleWifiFoyerCoordinator,
+    entry: ConfigEntry,
+) -> None:
+    """Remove Local IP entities that were created for secondary access points."""
+    entity_registry = er.async_get(hass)
+    group_id = entry.data[CONF_GROUP_ID]
+
+    for access_point_id, access_point in coordinator.access_points.items():
+        if _is_router(access_point):
+            continue
+
+        entity_id = entity_registry.async_get_entity_id(
+            "sensor", DOMAIN, f"{group_id}_{access_point_id}_local_ip"
+        )
+        if entity_id is not None:
+            entity_registry.async_remove(entity_id)
 
 
 class GoogleWifiFoyerAccessPointsSensor(
@@ -255,6 +297,39 @@ class GoogleWifiFoyerAccessPointIpSensor(
                 )
             }
         )
+
+
+class GoogleWifiFoyerTotalConnectedClientsSensor(
+    CoordinatorEntity[GoogleWifiFoyerCoordinator], SensorEntity
+):
+    """Show the total number of clients connected to the Wifi network."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:lan-connect"
+    _attr_name = "Connected clients"
+
+    def __init__(
+        self,
+        coordinator: GoogleWifiFoyerCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator)
+        self._group_id = entry.data[CONF_GROUP_ID]
+        self._attr_unique_id = f"{self._group_id}_connected_clients"
+
+    @property
+    def native_value(self) -> int:
+        """Return the number of clients connected across all access points."""
+        return sum(
+            station.get("connected") is True
+            for station in self.coordinator.data.values()
+        )
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Attach this sensor to the Wifi group device."""
+        return DeviceInfo(identifiers={(DOMAIN, self._group_id)})
 
 
 class GoogleWifiFoyerLocalStatusSensor(

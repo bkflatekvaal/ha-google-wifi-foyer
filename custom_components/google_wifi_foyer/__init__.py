@@ -6,6 +6,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_EMAIL
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import GoogleWifiFoyerApi
@@ -33,6 +34,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = GoogleWifiFoyerCoordinator(hass, entry, api)
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
+
+    _migrate_duplicated_tracker_entity_ids(hass, entry)
 
     device_registry = dr.async_get(hass)
     network_device = device_registry.async_get_or_create(
@@ -75,3 +78,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+def _migrate_duplicated_tracker_entity_ids(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
+    """Collapse legacy tracker IDs whose object ID was repeated exactly."""
+    entity_registry = er.async_get(hass)
+
+    for registry_entry in list(entity_registry.entities.values()):
+        if (
+            registry_entry.config_entry_id != entry.entry_id
+            or registry_entry.platform != DOMAIN
+            or not registry_entry.entity_id.startswith("device_tracker.")
+        ):
+            continue
+
+        object_id = registry_entry.entity_id.removeprefix("device_tracker.")
+        parts = object_id.split("_")
+        midpoint = len(parts) // 2
+        if len(parts) % 2 or parts[:midpoint] != parts[midpoint:]:
+            continue
+
+        new_entity_id = f"device_tracker.{'_'.join(parts[:midpoint])}"
+        if entity_registry.async_get(new_entity_id) is not None:
+            continue
+
+        entity_registry.async_update_entity(
+            registry_entry.entity_id, new_entity_id=new_entity_id
+        )

@@ -48,7 +48,10 @@ class GoogleWifiFoyerStationTracker(
 ):
     """Presence tracker for one Foyer station."""
 
-    _attr_has_entity_name = True
+    # Station trackers are intentionally not attached to a device-registry device.
+    # Treating their name as device-relative makes Home Assistant combine the
+    # station name with itself (for example, ``epaperap_epaperap``).
+    _attr_has_entity_name = False
 
     def __init__(
         self,
@@ -59,7 +62,6 @@ class GoogleWifiFoyerStationTracker(
         super().__init__(coordinator)
         self._station_id = station_id
         self._attr_unique_id = f"{entry.data[CONF_GROUP_ID]}_{station_id}"
-        self._attr_name = self._station_name
 
     @property
     def _station(self) -> dict[str, Any]:

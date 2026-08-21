@@ -6,7 +6,7 @@ It uses Google's undocumented `googlehomefoyer-pa.googleapis.com` API and the
 `https://www.googleapis.com/auth/accesspoints` OAuth scope. This may stop working
 without notice if Google changes the private API or authentication flow.
 
-## Current v0.2.1 scope
+## Current v0.2.2 scope
 
 - UI config flow
 - EmbeddedSetup `oauth_token` -> reusable `aas_et` master token
@@ -36,7 +36,7 @@ without notice if Google changes the private API or authentication flow.
 
 1. Open HACS in Home Assistant and select **Integrations**.
 2. Open the menu in the upper-right corner and select **Custom repositories**.
-3. Enter `https://github.com/bkflatekvaal/google_wifi_foyer`, select
+3. Enter `https://github.com/bkflatekvaal/ha-google-wifi-foyer`, select
    **Integration** as the category, and add the repository.
 4. Find **Google Wifi Foyer** in HACS and select **Download**.
 5. Restart Home Assistant.
@@ -46,7 +46,7 @@ without notice if Google changes the private API or authentication flow.
 ### Manual installation
 
 Copy `custom_components/google_wifi_foyer` from the
-[repository](https://github.com/bkflatekvaal/google_wifi_foyer) to
+[repository](https://github.com/bkflatekvaal/ha-google-wifi-foyer) to
 `/config/custom_components/google_wifi_foyer`, then restart Home Assistant and
 add **Google Wifi Foyer** from **Settings -> Devices & services**.
 
