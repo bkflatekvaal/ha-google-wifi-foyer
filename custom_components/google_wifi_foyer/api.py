@@ -224,6 +224,79 @@ class GoogleWifiFoyerApi:
 
         raise GoogleWifiFoyerAuthError("Unable to authenticate with Foyer")
 
+    async def _async_put_json(
+        self, path: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Perform an authenticated JSON PUT."""
+        token = await self._async_get_access_token()
+        url = f"{FOYER_BASE_URL}{path}"
+
+        for attempt in range(2):
+            try:
+                async with self._session.put(
+                    url,
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Accept": "application/json",
+                        "Content-Type": "application/json; charset=utf-8",
+                    },
+                    timeout=aiohttp.ClientTimeout(total=30),
+                ) as response:
+                    if response.status == 401 and attempt == 0:
+                        token = await self._async_get_access_token(force_refresh=True)
+                        continue
+                    if response.status in (401, 403):
+                        text = await response.text()
+                        raise GoogleWifiFoyerAuthError(
+                            "Foyer authentication failed "
+                            f"({response.status}): {text[:300]}"
+                        )
+                    if response.status >= 400:
+                        text = await response.text()
+                        raise GoogleWifiFoyerConnectionError(
+                            f"Foyer returned HTTP {response.status}: {text[:300]}"
+                        )
+                    data = await response.json(content_type=None)
+                    if not isinstance(data, dict):
+                        raise GoogleWifiFoyerConnectionError(
+                            "Foyer returned an unexpected response"
+                        )
+                    return data
+            except GoogleWifiFoyerError:
+                raise
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
+                raise GoogleWifiFoyerConnectionError(
+                    f"Could not connect to Foyer: {err}"
+                ) from err
+
+        raise GoogleWifiFoyerAuthError("Unable to authenticate with Foyer")
+
+    async def async_set_family_paused(
+        self, group_id: str, family_id: str, paused: bool
+    ) -> None:
+        """Pause or resume every station in a Family Wi-Fi group."""
+        await self._async_put_json(
+            f"/v2/groups/{group_id}/stationBlocking?prettyPrint=false",
+            {"blocked": paused, "stationSetId": [family_id]},
+        )
+
+    async def async_set_guest_network_enabled(
+        self, group_id: str, enabled: bool
+    ) -> None:
+        """Enable or disable the guest wireless network."""
+        await self._async_put_json(
+            f"/v2/groups/{group_id}/guestWireless?prettyPrint=false",
+            {"enabled": enabled},
+        )
+
+    async def async_set_ap_indicator(self, access_point_id: str, intensity: int) -> None:
+        """Set an access point's status-light intensity."""
+        await self._async_put_json(
+            f"/v2/accesspoints/{access_point_id}/lighting?prettyPrint=false",
+            {"automatic": False, "intensity": intensity},
+        )
+
     async def async_get_groups(self) -> list[dict[str, Any]]:
         """Return Google Wifi networks available to the account."""
         data = await self._async_get_json("/v2/groups?prettyPrint=false")

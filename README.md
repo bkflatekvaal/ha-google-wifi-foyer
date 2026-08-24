@@ -6,7 +6,7 @@ It uses Google's undocumented `googlehomefoyer-pa.googleapis.com` API and the
 `https://www.googleapis.com/auth/accesspoints` OAuth scope. This may stop working
 without notice if Google changes the private API or authentication flow.
 
-## Current v0.3.3 scope
+## Current v0.4.0 scope
 
 - UI config flow
 - EmbeddedSetup `oauth_token` -> reusable `aas_et` master token
@@ -30,8 +30,11 @@ without notice if Google changes the private API or authentication flow.
 - Show a connected-client count and structured client list on each access point
 - Show total connected-client and access-point count/list sensors on the network
 - Show Family Wi-Fi connected-client, pause, filtering, and schedule information
+- Pause and resume Family Wi-Fi groups from Home Assistant switches
 - Show the currently prioritized device and prioritization expiry
 - Show main and guest SSIDs, guest-network state, and connected guest clients
+- Enable and disable the guest network from a Home Assistant switch
+- Set each access point's indicator brightness to Off, Low, or High
 - Show DHCP-reserved static IP addresses on device trackers
 
 ## Installation

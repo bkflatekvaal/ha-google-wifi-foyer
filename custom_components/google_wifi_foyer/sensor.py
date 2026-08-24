@@ -350,7 +350,6 @@ class GoogleWifiFoyerTotalConnectedClientsSensor(
 ):
     """Show the total number of clients connected to the Wifi network."""
 
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
     _attr_icon = "mdi:lan-connect"
     _attr_name = "Connected clients"
@@ -600,7 +599,6 @@ class GoogleWifiFoyerConnectedClientsSensor(
 ):
     """Show the clients currently connected to one access point."""
 
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_has_entity_name = True
     _attr_icon = "mdi:lan-connect"
     _attr_name = "Connected clients"

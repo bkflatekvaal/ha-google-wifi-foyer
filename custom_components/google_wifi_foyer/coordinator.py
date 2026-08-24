@@ -163,6 +163,24 @@ def _safe_access_point(access_point: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(properties, dict):
         properties = {}
 
+    lighting: dict[str, Any] | None = None
+    for container in (settings, other_settings, properties, access_point):
+        if not isinstance(container, dict):
+            continue
+        for key in (
+            "lighting",
+            "lightingSettings",
+            "accessPointLightingSettings",
+            "lightSettings",
+        ):
+            candidate = container.get(key)
+            if isinstance(candidate, dict):
+                lighting = candidate
+                break
+        if lighting is not None:
+            break
+    intensity = lighting.get("intensity") if lighting is not None else None
+
     return {
         "id": access_point["id"],
         "name": _string_value(other_settings, "apName"),
@@ -180,6 +198,9 @@ def _safe_access_point(access_point: dict[str, Any]) -> dict[str, Any]:
         else None,
         "is_bridged": properties.get("isBridged")
         if isinstance(properties.get("isBridged"), bool)
+        else None,
+        "indicator_intensity": intensity
+        if isinstance(intensity, (int, float)) and not isinstance(intensity, bool)
         else None,
     }
 

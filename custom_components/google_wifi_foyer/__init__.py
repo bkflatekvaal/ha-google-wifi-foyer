@@ -36,6 +36,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.runtime_data = coordinator
 
     _migrate_duplicated_tracker_entity_ids(hass, entry)
+    _remove_retired_binary_sensors(hass, entry)
     _remove_deleted_family_entities(hass, entry, coordinator)
 
     device_registry = dr.async_get(hass)
@@ -131,5 +132,28 @@ def _remove_deleted_family_entities(
             and registry_entry.platform == DOMAIN
             and registry_entry.unique_id.startswith(family_prefix)
             and registry_entry.unique_id not in valid_unique_ids
+        ):
+            entity_registry.async_remove(registry_entry.entity_id)
+
+
+def _remove_retired_binary_sensors(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove read-only entities replaced by writable switches."""
+    entity_registry = er.async_get(hass)
+    group_id = entry.data[CONF_GROUP_ID]
+    guest_unique_id = f"{group_id}_guest_network"
+    family_prefix = f"{group_id}_family_"
+
+    for registry_entry in list(entity_registry.entities.values()):
+        if (
+            registry_entry.config_entry_id == entry.entry_id
+            and registry_entry.platform == DOMAIN
+            and registry_entry.entity_id.startswith("binary_sensor.")
+            and (
+                registry_entry.unique_id == guest_unique_id
+                or (
+                    registry_entry.unique_id.startswith(family_prefix)
+                    and registry_entry.unique_id.endswith("_paused")
+                )
+            )
         ):
             entity_registry.async_remove(registry_entry.entity_id)
