@@ -10,6 +10,7 @@ CONF_MASTER_TOKEN = "master_token"
 CONF_ANDROID_ID = "android_id"
 CONF_GROUP_ID = "group_id"
 CONF_NETWORK_NAME = "network_name"
+CONF_LAST_GUEST_SSID = "last_guest_ssid"
 
 FOYER_BASE_URL = "https://googlehomefoyer-pa.googleapis.com"
 FOYER_GRPC_TARGET = "googlehomefoyer-pa.googleapis.com:443"

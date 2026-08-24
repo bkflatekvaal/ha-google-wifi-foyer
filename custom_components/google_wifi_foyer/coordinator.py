@@ -17,7 +17,11 @@ from .api import (
     GoogleWifiFoyerAuthError,
     GoogleWifiFoyerConnectionError,
 )
-from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
+from .const import (
+    CONF_LAST_GUEST_SSID,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,6 +50,12 @@ class GoogleWifiFoyerCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self.prioritized_station: dict[str, Any] | None = None
         self.main_network: dict[str, Any] | None = None
         self.guest_network: dict[str, Any] | None = None
+        saved_guest_ssid = entry.data.get(CONF_LAST_GUEST_SSID)
+        self._guest_ssid = (
+            saved_guest_ssid
+            if isinstance(saved_guest_ssid, str) and saved_guest_ssid
+            else None
+        )
         self.dhcp_reservations: dict[str, str] = {}
         self._sensitive_info: dict[str, dict[str, Any]] = {}
         self._sensitive_info_attempted: set[str] = set()
@@ -72,6 +82,22 @@ class GoogleWifiFoyerCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             self.family_groups, self.station_policies = _safe_family_wifi(group)
             self.prioritized_station = _safe_prioritized_station(group)
             self.main_network, self.guest_network = _safe_wireless_networks(group)
+            if self.guest_network is not None:
+                guest_ssid = self.guest_network.get("ssid")
+                if isinstance(guest_ssid, str) and guest_ssid:
+                    if guest_ssid != self._guest_ssid:
+                        self._guest_ssid = guest_ssid
+                        self.hass.config_entries.async_update_entry(
+                            self.entry,
+                            data={
+                                **self.entry.data,
+                                CONF_LAST_GUEST_SSID: guest_ssid,
+                            },
+                        )
+                elif self._guest_ssid is not None:
+                    # Foyer omits the SSID while guest Wi-Fi is disabled even
+                    # though it retains the configuration for later reuse.
+                    self.guest_network["ssid"] = self._guest_ssid
             self.dhcp_reservations = _safe_dhcp_reservations(group)
 
             local_status_results = await asyncio.gather(
