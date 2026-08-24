@@ -38,6 +38,10 @@ _CREATE_SENSITIVE_OPERATION = (
 _LIST_SENSITIVE_INFO = (
     "/google.wirelessaccess.accesspoints.v2.StationsService/ListSensitiveInfo"
 )
+_UPDATE_GUEST_WIRELESS_CONFIG = (
+    "/google.wirelessaccess.accesspoints.v2.NetworkSettingsService/"
+    "UpdateGuestWirelessConfig"
+)
 
 
 class GoogleWifiFoyerError(Exception):
@@ -285,9 +289,14 @@ class GoogleWifiFoyerApi:
         self, group_id: str, enabled: bool
     ) -> None:
         """Enable or disable the guest wireless network."""
-        await self._async_put_json(
-            f"/v2/groups/{group_id}/guestNetwork?prettyPrint=false",
-            {"enabled": enabled},
+        # The current Google Home app uses NetworkSettingsService rather than
+        # the retired Foyer REST route. Field 1 is the group ID; field 2 is a
+        # google.protobuf.BoolValue. Omitting SSID/PSK preserves them.
+        enabled_wrapper = _encode_varint_field(1, int(enabled))
+        await self._async_grpc_unary(
+            _UPDATE_GUEST_WIRELESS_CONFIG,
+            _encode_string_field(1, group_id)
+            + _encode_message_field(2, enabled_wrapper),
         )
 
     async def async_set_ap_indicator(self, access_point_id: str, intensity: int) -> None:
@@ -468,6 +477,20 @@ def _encode_string_field(field_number: int, value: str) -> bytes:
     payload = value.encode("utf-8")
     return (
         _encode_varint((field_number << 3) | 2) + _encode_varint(len(payload)) + payload
+    )
+
+
+def _encode_varint_field(field_number: int, value: int) -> bytes:
+    """Encode a protobuf varint field."""
+    return _encode_varint(field_number << 3) + _encode_varint(value)
+
+
+def _encode_message_field(field_number: int, payload: bytes) -> bytes:
+    """Encode a length-delimited protobuf message field."""
+    return (
+        _encode_varint((field_number << 3) | 2)
+        + _encode_varint(len(payload))
+        + payload
     )
 
 

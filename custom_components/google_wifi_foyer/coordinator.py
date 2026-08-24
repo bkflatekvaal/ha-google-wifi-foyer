@@ -498,15 +498,22 @@ def blocking_policy_is_active(policy: Any) -> bool:
     """Return whether a Family Wi-Fi blocking policy is currently active."""
     if not isinstance(policy, dict):
         return False
+    created = policy.get("creation_timestamp")
     expiry = policy.get("expiry_timestamp")
     if not isinstance(expiry, str) or not expiry:
         return True
+    # Foyer represents an indefinite pause with the Unix epoch. Resuming the
+    # group leaves a tombstone whose expiry is identical to its creation time.
+    if isinstance(created, str) and created and expiry == created:
+        return False
     try:
         expiry_time = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
     except ValueError:
         return True
     if expiry_time.tzinfo is None:
         expiry_time = expiry_time.replace(tzinfo=UTC)
+    if expiry_time == datetime(1970, 1, 1, tzinfo=UTC):
+        return True
     return expiry_time > datetime.now(UTC)
 
 
