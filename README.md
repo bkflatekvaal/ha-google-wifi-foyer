@@ -6,7 +6,7 @@ It uses Google's undocumented `googlehomefoyer-pa.googleapis.com` API and the
 `https://www.googleapis.com/auth/accesspoints` OAuth scope. This may stop working
 without notice if Google changes the private API or authentication flow.
 
-## Current v0.4.7 scope
+## Current v0.4.8 scope
 
 - UI config flow
 - EmbeddedSetup `oauth_token` -> reusable `aas_et` master token
@@ -34,6 +34,8 @@ without notice if Google changes the private API or authentication flow.
 - Show the currently prioritized device and prioritization expiry
 - Show main and guest SSIDs, guest-network state, and connected guest clients
 - Enable and disable the guest network from a Home Assistant switch
+- Optionally store the guest SSID and password in the integration's Configure
+  dialog as a fallback when Foyer cannot return disabled guest credentials
 - Set each access point's indicator brightness to Off, Low, or High
 - Show DHCP-reserved static IP addresses on device trackers
 

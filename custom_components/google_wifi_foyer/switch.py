@@ -12,7 +12,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_GROUP_ID, DOMAIN
+from .const import CONF_GROUP_ID, CONF_GUEST_PSK, CONF_GUEST_SSID, DOMAIN
 from .coordinator import GoogleWifiFoyerCoordinator, blocking_policy_is_active
 
 
@@ -53,6 +53,7 @@ class GoogleWifiFoyerGuestNetworkSwitch(
         self, coordinator: GoogleWifiFoyerCoordinator, entry: ConfigEntry
     ) -> None:
         super().__init__(coordinator)
+        self._entry = entry
         self._group_id = entry.data[CONF_GROUP_ID]
         self._attr_unique_id = f"{self._group_id}_guest_network"
 
@@ -80,22 +81,32 @@ class GoogleWifiFoyerGuestNetworkSwitch(
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Enable guest Wi-Fi."""
         guest = self.coordinator.guest_network
-        ssid = guest.get("ssid") if isinstance(guest, dict) else None
+        ssid = self._entry.options.get(CONF_GUEST_SSID) or (
+            guest.get("ssid") if isinstance(guest, dict) else None
+        )
         if not isinstance(ssid, str) or not ssid:
             raise HomeAssistantError("Guest network has no configured SSID")
         await self.coordinator.api.async_set_guest_network_enabled(
-            self._group_id, True, ssid
+            self._group_id,
+            True,
+            ssid,
+            self._entry.options.get(CONF_GUEST_PSK),
         )
         await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disable guest Wi-Fi."""
         guest = self.coordinator.guest_network
-        ssid = guest.get("ssid") if isinstance(guest, dict) else None
+        ssid = self._entry.options.get(CONF_GUEST_SSID) or (
+            guest.get("ssid") if isinstance(guest, dict) else None
+        )
         if not isinstance(ssid, str) or not ssid:
             raise HomeAssistantError("Guest network has no configured SSID")
         await self.coordinator.api.async_set_guest_network_enabled(
-            self._group_id, False, ssid
+            self._group_id,
+            False,
+            ssid,
+            self._entry.options.get(CONF_GUEST_PSK),
         )
         await self.coordinator.async_request_refresh()
 

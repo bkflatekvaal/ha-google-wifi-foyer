@@ -40,5 +40,24 @@
       "reauth_required": "Authentication needs to be started again.",
       "reauth_successful": "Google Wifi authentication was renewed successfully."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Guest network credentials",
+        "description": "Optional fallback used when Foyer cannot retrieve the guest password while the network is disabled. Enter both fields or leave both empty. The password is stored in Home Assistant's config entry and is included in backups.",
+        "data": {
+          "guest_ssid": "Guest network name (SSID)",
+          "guest_psk": "Guest network password"
+        },
+        "data_description": {
+          "guest_ssid": "The existing guest network name used by Google Home.",
+          "guest_psk": "The existing guest network password. It is not exposed as an entity state or attribute."
+        }
+      }
+    },
+    "error": {
+      "guest_credentials_incomplete": "Enter both the guest SSID and password, or leave both empty."
+    }
   }
 }

@@ -40,5 +40,24 @@
       "reauth_required": "Autentiseringen må startes på nytt.",
       "reauth_successful": "Google Wifi-autentiseringen ble fornyet."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Gjestenettverkets innlogging",
+        "description": "Valgfri reserve som brukes når Foyer ikke kan hente gjestepassordet mens nettverket er deaktivert. Fyll ut begge feltene eller la begge stå tomme. Passordet lagres i Home Assistants konfigurasjon og inkluderes i sikkerhetskopier.",
+        "data": {
+          "guest_ssid": "Navn på gjestenettverk (SSID)",
+          "guest_psk": "Passord for gjestenettverk"
+        },
+        "data_description": {
+          "guest_ssid": "Det eksisterende navnet på gjestenettverket i Google Home.",
+          "guest_psk": "Det eksisterende gjestepassordet. Det vises ikke som entitetstilstand eller attributt."
+        }
+      }
+    },
+    "error": {
+      "guest_credentials_incomplete": "Fyll ut både gjestenettverkets SSID og passord, eller la begge stå tomme."
+    }
   }
 }

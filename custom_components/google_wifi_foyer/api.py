@@ -294,10 +294,19 @@ class GoogleWifiFoyerApi:
         )
 
     async def async_set_guest_network_enabled(
-        self, group_id: str, enabled: bool, ssid: str
+        self,
+        group_id: str,
+        enabled: bool,
+        ssid: str,
+        fallback_guest_psk: str | None = None,
     ) -> None:
         """Enable or disable the guest wireless network."""
-        guest_psk = await self.async_get_guest_psk(group_id)
+        try:
+            guest_psk = await self.async_get_guest_psk(group_id)
+        except GoogleWifiFoyerConnectionError:
+            if not fallback_guest_psk:
+                raise
+            guest_psk = fallback_guest_psk
 
         # UpdateGuestWirelessConfig replaces the complete configuration. The
         # current SSID and PSK must be sent even when only enabled is changing.
