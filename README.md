@@ -6,7 +6,7 @@ It uses Google's undocumented `googlehomefoyer-pa.googleapis.com` API and the
 `https://www.googleapis.com/auth/accesspoints` OAuth scope. This may stop working
 without notice if Google changes the private API or authentication flow.
 
-## Current v0.4.6 scope
+## Current v0.4.7 scope
 
 - UI config flow
 - EmbeddedSetup `oauth_token` -> reusable `aas_et` master token

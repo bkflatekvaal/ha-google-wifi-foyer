@@ -8,6 +8,7 @@ import ipaddress
 import logging
 import time
 from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 import gpsoauth
@@ -323,6 +324,8 @@ class GoogleWifiFoyerApi:
                 "Foyer did not return a PSK operation ID"
             )
 
+        await self._async_wait_for_operation(operation_id)
+
         response = await self._async_grpc_unary(
             _GET_PSKS, _encode_string_field(1, operation_id)
         )
@@ -332,6 +335,23 @@ class GoogleWifiFoyerApi:
                 "Foyer did not return the current guest-network password"
             )
         return guest_psk
+
+    async def _async_wait_for_operation(self, operation_id: str) -> None:
+        """Wait until a Foyer operation is ready for its follow-up RPC."""
+        encoded_id = quote(operation_id, safe="")
+        for _ in range(20):
+            operation = await self._async_get_json(
+                f"/v2/operations/{encoded_id}?prettyPrint=false"
+            )
+            state = operation.get("operationState") or operation.get("state")
+            if state in ("DONE", "COMPLETED"):
+                return
+            if state in ("FAILED", "CANCELLED"):
+                raise GoogleWifiFoyerConnectionError(
+                    f"Foyer PSK operation ended in state {state}"
+                )
+            await asyncio.sleep(0.5)
+        raise GoogleWifiFoyerConnectionError("Foyer PSK operation timed out")
 
     async def async_set_ap_indicator(self, access_point_id: str, intensity: int) -> None:
         """Set an access point's status-light intensity."""
