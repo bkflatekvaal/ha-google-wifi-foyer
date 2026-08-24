@@ -179,7 +179,8 @@ def _safe_access_point(access_point: dict[str, Any]) -> dict[str, Any]:
                 break
         if lighting is not None:
             break
-    intensity = lighting.get("intensity") if lighting is not None else None
+    # Foyer omits the zero-valued scalar when the indicator is off.
+    intensity = lighting.get("intensity", 0) if lighting is not None else None
 
     return {
         "id": access_point["id"],
@@ -244,12 +245,16 @@ def _safe_family_wifi(
             "schedules": [],
         }
 
-    for policy in _dict_items(family_settings, "stationSetPolicies"):
-        station_set_id = _string_value(policy, "stationSetId")
-        if station_set_id in family_groups:
-            family_groups[station_set_id]["blocking_policy"] = _safe_blocking_policy(
-                policy.get("blockingPolicy")
-            )
+    for policy in _station_set_blocking_policies(family_settings):
+        station_set_ids = _string_items(policy, "stationSetIds")
+        if (station_set_id := _string_value(policy, "stationSetId")) is not None:
+            station_set_ids.append(station_set_id)
+        blocking_policy = _safe_blocking_policy(
+            policy.get("blockingPolicy", policy)
+        )
+        for station_set_id in station_set_ids:
+            if station_set_id in family_groups:
+                family_groups[station_set_id]["blocking_policy"] = blocking_policy
 
     for policy in _dict_items(family_settings, "contentFilteringPolicies"):
         mode = _string_value(policy, "safeFilteringMode")
@@ -397,10 +402,38 @@ def _string_items(data: dict[str, Any], key: str) -> list[str]:
 def _safe_blocking_policy(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
+    if value.get("blocked") is False:
+        return None
     return {
         "creation_timestamp": _string_value(value, "creationTimestamp"),
         "expiry_timestamp": _string_value(value, "expiryTimestamp"),
     }
+
+
+def _station_set_blocking_policies(value: Any) -> list[dict[str, Any]]:
+    """Find station-set blocking policies across Foyer response variants."""
+    policies: list[dict[str, Any]] = []
+    if isinstance(value, list):
+        for item in value:
+            policies.extend(_station_set_blocking_policies(item))
+        return policies
+    if not isinstance(value, dict):
+        return policies
+
+    has_station_set = isinstance(value.get("stationSetId"), str) or isinstance(
+        value.get("stationSetIds"), list
+    )
+    has_blocking_data = isinstance(value.get("blockingPolicy"), dict) or any(
+        key in value for key in ("blocked", "creationTimestamp", "expiryTimestamp")
+    )
+    if has_station_set and has_blocking_data:
+        policies.append(value)
+        return policies
+
+    for nested in value.values():
+        if isinstance(nested, (dict, list)):
+            policies.extend(_station_set_blocking_policies(nested))
+    return policies
 
 
 def _safe_schedule(value: dict[str, Any]) -> dict[str, Any]:

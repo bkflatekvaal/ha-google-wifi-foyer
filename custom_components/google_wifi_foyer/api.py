@@ -286,7 +286,7 @@ class GoogleWifiFoyerApi:
     ) -> None:
         """Enable or disable the guest wireless network."""
         await self._async_put_json(
-            f"/v2/groups/{group_id}/guestWireless?prettyPrint=false",
+            f"/v2/groups/{group_id}/guestNetwork?prettyPrint=false",
             {"enabled": enabled},
         )
 
