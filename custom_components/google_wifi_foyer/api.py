@@ -42,6 +42,13 @@ _UPDATE_GUEST_WIRELESS_CONFIG = (
     "/google.wirelessaccess.accesspoints.v2.NetworkSettingsService/"
     "UpdateGuestWirelessConfig"
 )
+_CREATE_OPERATION_FOR_GET_PSKS = (
+    "/google.wirelessaccess.accesspoints.v2.NetworkSettingsService/"
+    "CreateOperationForGetPsks"
+)
+_GET_PSKS = (
+    "/google.wirelessaccess.accesspoints.v2.NetworkSettingsService/GetPsks"
+)
 
 
 class GoogleWifiFoyerError(Exception):
@@ -286,18 +293,45 @@ class GoogleWifiFoyerApi:
         )
 
     async def async_set_guest_network_enabled(
-        self, group_id: str, enabled: bool
+        self, group_id: str, enabled: bool, ssid: str
     ) -> None:
         """Enable or disable the guest wireless network."""
-        # The current Google Home app uses NetworkSettingsService rather than
-        # the retired Foyer REST route. Field 1 is the group ID; field 2 is a
-        # google.protobuf.BoolValue. Omitting SSID/PSK preserves them.
+        guest_psk = await self.async_get_guest_psk(group_id)
+
+        # UpdateGuestWirelessConfig replaces the complete configuration. The
+        # current SSID and PSK must be sent even when only enabled is changing.
         enabled_wrapper = _encode_varint_field(1, int(enabled))
+        wireless_config = _encode_string_field(1, ssid) + _encode_string_field(
+            2, guest_psk
+        )
         await self._async_grpc_unary(
             _UPDATE_GUEST_WIRELESS_CONFIG,
             _encode_string_field(1, group_id)
-            + _encode_message_field(2, enabled_wrapper),
+            + _encode_message_field(2, enabled_wrapper)
+            + _encode_message_field(3, wireless_config),
         )
+
+    async def async_get_guest_psk(self, group_id: str) -> str:
+        """Retrieve the guest PSK needed to preserve wireless configuration."""
+        create_response = await self._async_grpc_unary(
+            _CREATE_OPERATION_FOR_GET_PSKS, _encode_string_field(1, group_id)
+        )
+        operation = _first_length_delimited(create_response, 1)
+        operation_id = _first_string(operation, 1) if operation is not None else None
+        if not operation_id:
+            raise GoogleWifiFoyerConnectionError(
+                "Foyer did not return a PSK operation ID"
+            )
+
+        response = await self._async_grpc_unary(
+            _GET_PSKS, _encode_string_field(1, operation_id)
+        )
+        guest_psk = _first_string(response, 2)
+        if not guest_psk:
+            raise GoogleWifiFoyerConnectionError(
+                "Foyer did not return the current guest-network password"
+            )
+        return guest_psk
 
     async def async_set_ap_indicator(self, access_point_id: str, intensity: int) -> None:
         """Set an access point's status-light intensity."""

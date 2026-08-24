@@ -7,6 +7,7 @@ from typing import Any
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -78,15 +79,23 @@ class GoogleWifiFoyerGuestNetworkSwitch(
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Enable guest Wi-Fi."""
+        guest = self.coordinator.guest_network
+        ssid = guest.get("ssid") if isinstance(guest, dict) else None
+        if not isinstance(ssid, str) or not ssid:
+            raise HomeAssistantError("Guest network has no configured SSID")
         await self.coordinator.api.async_set_guest_network_enabled(
-            self._group_id, True
+            self._group_id, True, ssid
         )
         await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disable guest Wi-Fi."""
+        guest = self.coordinator.guest_network
+        ssid = guest.get("ssid") if isinstance(guest, dict) else None
+        if not isinstance(ssid, str) or not ssid:
+            raise HomeAssistantError("Guest network has no configured SSID")
         await self.coordinator.api.async_set_guest_network_enabled(
-            self._group_id, False
+            self._group_id, False, ssid
         )
         await self.coordinator.async_request_refresh()
 
