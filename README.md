@@ -6,7 +6,7 @@ It uses Google's undocumented `googlehomefoyer-pa.googleapis.com` API and the
 `https://www.googleapis.com/auth/accesspoints` OAuth scope. This may stop working
 without notice if Google changes the private API or authentication flow.
 
-## Current v0.4.8 scope
+## Current v0.4.9 scope
 
 - UI config flow
 - EmbeddedSetup `oauth_token` -> reusable `aas_et` master token
@@ -26,9 +26,12 @@ without notice if Google changes the private API or authentication flow.
 - Create one child device for each access point, named with its room
 - Show an IP address diagnostic sensor on each access point device
 - Show local firmware, update, uptime, restart, and status diagnostics from each
-  access point's `/api/v1/status` endpoint, plus WAN IP on the primary router
-- Show a connected-client count and structured client list on each access point
-- Show total connected-client and access-point count/list sensors on the network
+  access point's `/api/v1/status` endpoint, plus WAN IP on the primary router.
+  Small fluctuations in the restart time inferred from uptime are filtered out
+- Show a numeric connected-client measurement and structured client list on each
+  access point
+- Show numeric total connected-client and access-point measurements, with detailed
+  client/access-point lists available as sensor attributes
 - Show Family Wi-Fi connected-client, pause, filtering, and schedule information
 - Pause and resume Family Wi-Fi groups from Home Assistant switches
 - Show the currently prioritized device and prioritization expiry
@@ -83,6 +86,16 @@ are normally returned with `status.type = STATION_OFFLINE` and a `lastSeen` time
 All stations returned by Google are created as device trackers, including old/offline
 stations. Trackers do not create device-registry entries. Disable unwanted entities
 in Home Assistant's entity registry.
+
+Connected-client counts (including total, guest, per-access-point, and Family Wi-Fi
+counts) and the access-point count are numeric measurement sensors. Home Assistant
+can graph these sensors and treats them as measurements rather than textual activity.
+
+The local status API supplies uptime rather than an exact boot timestamp. The
+integration derives **Last restart** from that uptime and retains the existing value
+when a new estimate differs by less than 30 seconds. This prevents request timing and
+whole-second rounding from repeatedly changing the entity by a few seconds; a real
+restart still updates it.
 
 ## Notes
 
