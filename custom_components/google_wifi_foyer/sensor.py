@@ -11,6 +11,7 @@ from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
+    SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory, UnitOfTime
@@ -27,6 +28,10 @@ from .coordinator import (
     prioritized_station_is_active,
     station_is_guest,
 )
+
+# The local API reports whole-second uptime after the request has completed.
+# Ignore the resulting small movement in the inferred boot timestamp.
+LAST_RESTART_CHANGE_THRESHOLD = timedelta(seconds=30)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -248,6 +253,7 @@ class GoogleWifiFoyerAccessPointsSensor(
     _attr_has_entity_name = True
     _attr_icon = "mdi:access-point-network"
     _attr_name = "Access points"
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(
         self,
@@ -353,6 +359,7 @@ class GoogleWifiFoyerTotalConnectedClientsSensor(
     _attr_has_entity_name = True
     _attr_icon = "mdi:lan-connect"
     _attr_name = "Connected clients"
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(
         self,
@@ -433,6 +440,7 @@ class GoogleWifiFoyerGuestConnectedClientsSensor(
     _attr_has_entity_name = True
     _attr_icon = "mdi:account-multiple-outline"
     _attr_name = "Guest connected clients"
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(
         self,
@@ -558,6 +566,7 @@ class GoogleWifiFoyerLocalStatusSensor(
         self._entry = entry
         self._access_point_id = access_point_id
         self.entity_description = description
+        self._stable_last_restart: datetime | None = None
         self._attr_unique_id = (
             f"{entry.data[CONF_GROUP_ID]}_{access_point_id}_{description.key}"
         )
@@ -579,7 +588,19 @@ class GoogleWifiFoyerLocalStatusSensor(
         """Return the selected local status value."""
         if (status := self._local_status) is None:
             return None
-        return self.entity_description.value_fn(status)
+        value = self.entity_description.value_fn(status)
+        if self.entity_description.key != "last_restart" or not isinstance(
+            value, datetime
+        ):
+            return value
+
+        if (
+            self._stable_last_restart is None
+            or abs(value - self._stable_last_restart)
+            >= LAST_RESTART_CHANGE_THRESHOLD
+        ):
+            self._stable_last_restart = value
+        return self._stable_last_restart
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -602,6 +623,7 @@ class GoogleWifiFoyerConnectedClientsSensor(
     _attr_has_entity_name = True
     _attr_icon = "mdi:lan-connect"
     _attr_name = "Connected clients"
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(
         self,
@@ -678,6 +700,7 @@ class GoogleWifiFoyerFamilyConnectedClientsSensor(
 
     _attr_has_entity_name = True
     _attr_icon = "mdi:account-group"
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(
         self,
