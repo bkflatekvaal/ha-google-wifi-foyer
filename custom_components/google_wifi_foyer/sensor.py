@@ -143,6 +143,12 @@ async def async_setup_entry(
         GoogleWifiFoyerSsidSensor(coordinator, entry, guest=False),
         GoogleWifiFoyerSsidSensor(coordinator, entry, guest=True),
         GoogleWifiFoyerTotalConnectedClientsSensor(coordinator, entry),
+        GoogleWifiFoyerConnectionTypeClientsSensor(
+            coordinator, entry, connection_type="WIRELESS"
+        ),
+        GoogleWifiFoyerConnectionTypeClientsSensor(
+            coordinator, entry, connection_type="WIRED"
+        ),
         GoogleWifiFoyerGuestConnectedClientsSensor(hass, coordinator, entry),
         GoogleWifiFoyerPrioritizedDeviceSensor(hass, coordinator, entry),
     ]
@@ -375,6 +381,49 @@ class GoogleWifiFoyerTotalConnectedClientsSensor(
         """Return the number of clients connected across all access points."""
         return sum(
             station.get("connected") is True
+            for station in self.coordinator.data.values()
+        )
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Attach this sensor to the Wifi group device."""
+        return DeviceInfo(identifiers={(DOMAIN, self._group_id)})
+
+
+class GoogleWifiFoyerConnectionTypeClientsSensor(
+    CoordinatorEntity[GoogleWifiFoyerCoordinator], SensorEntity
+):
+    """Count connected clients of one connection type."""
+
+    _attr_has_entity_name = True
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        coordinator: GoogleWifiFoyerCoordinator,
+        entry: ConfigEntry,
+        *,
+        connection_type: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._group_id = entry.data[CONF_GROUP_ID]
+        self._connection_type = connection_type
+        if connection_type == "WIRELESS":
+            self._attr_name = "Wi-Fi connected clients"
+            self._attr_icon = "mdi:wifi"
+            suffix = "wireless_connected_clients"
+        else:
+            self._attr_name = "Wired connected clients"
+            self._attr_icon = "mdi:ethernet"
+            suffix = "wired_connected_clients"
+        self._attr_unique_id = f"{self._group_id}_{suffix}"
+
+    @property
+    def native_value(self) -> int:
+        """Return the number of connected clients of this type."""
+        return sum(
+            station.get("connected") is True
+            and station.get("connectionType") == self._connection_type
             for station in self.coordinator.data.values()
         )
 
@@ -798,17 +847,23 @@ class GoogleWifiFoyerFamilyContentFilterSensor(
 
     @property
     def available(self) -> bool:
-        """Return whether the group and filtering mode are available."""
+        """Return whether the family group still exists."""
+        return super().available and self._family_id in self.coordinator.family_groups
+
+    @property
+    def native_value(self) -> str:
+        """Return whether content filtering is enabled."""
         return (
-            super().available
-            and self._family_id in self.coordinator.family_groups
-            and self._family.get("content_filter") is not None
+            "On"
+            if self._family.get("content_filter") == "CLOUD_FILTERING_ENABLED"
+            else "Off"
         )
 
     @property
-    def native_value(self) -> str | None:
-        """Return Google's content-filtering mode."""
-        return self._family.get("content_filter")
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return Google's raw filtering mode when a policy is present."""
+        mode = self._family.get("content_filter")
+        return {"filtering_mode": mode} if mode is not None else None
 
     @property
     def device_info(self) -> DeviceInfo:

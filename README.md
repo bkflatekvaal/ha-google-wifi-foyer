@@ -6,7 +6,7 @@ It uses Google's undocumented `googlehomefoyer-pa.googleapis.com` API and the
 `https://www.googleapis.com/auth/accesspoints` OAuth scope. This may stop working
 without notice if Google changes the private API or authentication flow.
 
-## Current v0.5.0 scope
+## Current v0.5.1 scope
 
 - UI config flow
 - EmbeddedSetup `oauth_token` -> reusable `aas_et` master token
@@ -87,9 +87,9 @@ All stations returned by Google are created as device trackers, including old/of
 stations. Trackers do not create device-registry entries. Disable unwanted entities
 in Home Assistant's entity registry.
 
-Connected-client counts (including total, guest, per-access-point, and Family Wi-Fi
-counts) and the access-point count are numeric measurement sensors. Home Assistant
-can graph these sensors and treats them as measurements rather than textual activity.
+Connected-client counts (including total, Wi-Fi, wired, guest, per-access-point, and
+Family Wi-Fi counts) and the access-point count are numeric measurement sensors. Home
+Assistant can graph these sensors and treats them as measurements rather than textual activity.
 
 The local status API supplies uptime rather than an exact boot timestamp. The
 integration derives **Last restart** from that uptime and retains the existing value
