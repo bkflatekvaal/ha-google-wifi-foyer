@@ -3,19 +3,19 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+import hashlib
 import ipaddress
 import logging
 import time
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
 
 import aiohttp
 import gpsoauth
 import grpc
-from requests import RequestException
-
 from homeassistant.core import HomeAssistant
+from requests import RequestException
 
 from .const import (
     ACCESSPOINTS_SCOPE,
@@ -57,7 +57,11 @@ class GoogleWifiFoyerError(Exception):
 
 
 class GoogleWifiFoyerAuthError(GoogleWifiFoyerError):
-    """Authentication failed."""
+    """A service rejected an otherwise renewable access token."""
+
+
+class GoogleWifiFoyerCredentialError(GoogleWifiFoyerAuthError):
+    """The persisted Google master credential is no longer usable."""
 
 
 class GoogleWifiFoyerConnectionError(GoogleWifiFoyerError):
@@ -90,6 +94,13 @@ class GoogleWifiFoyerApi:
         self.android_id = android_id
         self._token: FoyerToken | None = None
         self._token_lock = asyncio.Lock()
+        self._android_id_fingerprint = hashlib.sha256(
+            android_id.encode("ascii", errors="replace")
+        ).hexdigest()[:8]
+        _LOGGER.debug(
+            "Initialized Foyer authentication (android_id_fingerprint=%s)",
+            self._android_id_fingerprint,
+        )
 
     @classmethod
     async def async_exchange_oauth_token(
@@ -135,6 +146,7 @@ class GoogleWifiFoyerApi:
             and self._token is not None
             and self._token.expires_at - TOKEN_REFRESH_MARGIN_SECONDS > now
         ):
+            _LOGGER.debug("Using cached Foyer access token")
             return self._token.value
 
         async with self._token_lock:
@@ -144,6 +156,7 @@ class GoogleWifiFoyerApi:
                 and self._token is not None
                 and self._token.expires_at - TOKEN_REFRESH_MARGIN_SECONDS > now
             ):
+                _LOGGER.debug("Using cached Foyer access token after lock wait")
                 return self._token.value
 
             def _oauth() -> dict[str, str]:
@@ -156,25 +169,78 @@ class GoogleWifiFoyerApi:
                     client_sig=GOOGLE_HOME_CLIENT_SIG,
                 )
 
-            try:
-                async with asyncio.timeout(GPSOAUTH_TIMEOUT_SECONDS):
-                    response = await self._hass.async_add_executor_job(_oauth)
-            except (RequestException, asyncio.TimeoutError) as err:
-                raise GoogleWifiFoyerConnectionError(
-                    f"Could not connect to Google authentication: {err}"
-                ) from err
-            except Exception as err:
-                raise GoogleWifiFoyerAuthError(
-                    f"Could not refresh Google access token: {err}"
-                ) from err
+            _LOGGER.debug(
+                "Requesting fresh Foyer access token (forced=%s, "
+                "android_id_fingerprint=%s)",
+                force_refresh,
+                self._android_id_fingerprint,
+            )
+            response: dict[str, str] = {}
+            for auth_attempt in range(2):
+                try:
+                    async with asyncio.timeout(GPSOAUTH_TIMEOUT_SECONDS):
+                        response = await self._hass.async_add_executor_job(_oauth)
+                except (RequestException, asyncio.TimeoutError) as err:
+                    _LOGGER.debug(
+                        "Google token mint transport failure (error_type=%s)",
+                        type(err).__name__,
+                    )
+                    raise GoogleWifiFoyerConnectionError(
+                        "Could not connect to Google authentication"
+                    ) from err
+                except Exception as err:
+                    _LOGGER.debug(
+                        "Unexpected Google token mint failure (error_type=%s)",
+                        type(err).__name__,
+                    )
+                    raise GoogleWifiFoyerConnectionError(
+                        "Google authentication token mint failed unexpectedly"
+                    ) from err
+
+                if not isinstance(response, dict):
+                    _LOGGER.warning(
+                        "Google returned a malformed token response "
+                        "(stage=perform_oauth, response_type=%s)",
+                        type(response).__name__,
+                    )
+                    raise GoogleWifiFoyerConnectionError(
+                        "Google returned a malformed authentication response"
+                    )
+
+                if response.get("Auth"):
+                    break
+
+                error = response.get("Error") or response.get("error")
+                if (
+                    isinstance(error, str)
+                    and error.casefold() == "badauthentication"
+                ):
+                    _LOGGER.warning(
+                        "Google rejected the persisted master credential "
+                        "(stage=perform_oauth, attempt=%s, error=BadAuthentication, "
+                        "android_id_fingerprint=%s)",
+                        auth_attempt + 1,
+                        self._android_id_fingerprint,
+                    )
+                    if auth_attempt == 0:
+                        continue
+                    raise GoogleWifiFoyerCredentialError(
+                        "Google rejected the persisted master credential"
+                    )
+                break
 
             token = response.get("Auth")
             if not token:
-                error = (
-                    response.get("Error") or response.get("error") or "unknown error"
+                error = response.get("Error") or response.get("error")
+                _LOGGER.warning(
+                    "Google did not mint a Foyer access token "
+                    "(stage=perform_oauth, error=%s)",
+                    error
+                    if error in {"ServiceDisabled", "RateLimitExceeded"}
+                    else "unclassified",
                 )
                 raise GoogleWifiFoyerAuthError(
-                    f"Google did not return an access token: {error}"
+                    "Google did not return a usable access token"
                 )
 
             try:
@@ -184,7 +250,10 @@ class GoogleWifiFoyerApi:
 
             self._token = FoyerToken(
                 value=token,
-                expires_at=time.time() + max(lifetime, 600),
+                expires_at=time.time() + max(lifetime, 0),
+            )
+            _LOGGER.debug(
+                "Fresh Foyer access token minted (lifetime_seconds=%s)", lifetime
             )
             return token
 
@@ -204,20 +273,30 @@ class GoogleWifiFoyerApi:
                     timeout=aiohttp.ClientTimeout(total=30),
                 ) as response:
                     if response.status == 401 and attempt == 0:
+                        _LOGGER.debug(
+                            "Foyer REST rejected cached access token; minting a fresh "
+                            "token and retrying once (status=401)"
+                        )
                         token = await self._async_get_access_token(force_refresh=True)
                         continue
 
                     if response.status in (401, 403):
-                        text = await response.text()
+                        _LOGGER.warning(
+                            "Foyer REST authorization failed after token refresh "
+                            "(status=%s, attempt=%s)",
+                            response.status,
+                            attempt + 1,
+                        )
                         raise GoogleWifiFoyerAuthError(
-                            "Foyer authentication failed "
-                            f"({response.status}): {text[:300]}"
+                            f"Foyer authorization failed (HTTP {response.status})"
                         )
 
                     if response.status >= 400:
-                        text = await response.text()
+                        _LOGGER.debug(
+                            "Foyer REST request failed (status=%s)", response.status
+                        )
                         raise GoogleWifiFoyerConnectionError(
-                            f"Foyer returned HTTP {response.status}: {text[:300]}"
+                            f"Foyer returned HTTP {response.status}"
                         )
 
                     data = await response.json(content_type=None)
@@ -256,18 +335,28 @@ class GoogleWifiFoyerApi:
                     timeout=aiohttp.ClientTimeout(total=30),
                 ) as response:
                     if response.status == 401 and attempt == 0:
+                        _LOGGER.debug(
+                            "Foyer REST rejected cached access token; minting a fresh "
+                            "token and retrying once (status=401)"
+                        )
                         token = await self._async_get_access_token(force_refresh=True)
                         continue
                     if response.status in (401, 403):
-                        text = await response.text()
+                        _LOGGER.warning(
+                            "Foyer REST authorization failed after token refresh "
+                            "(status=%s, attempt=%s)",
+                            response.status,
+                            attempt + 1,
+                        )
                         raise GoogleWifiFoyerAuthError(
-                            "Foyer authentication failed "
-                            f"({response.status}): {text[:300]}"
+                            f"Foyer authorization failed (HTTP {response.status})"
                         )
                     if response.status >= 400:
-                        text = await response.text()
+                        _LOGGER.debug(
+                            "Foyer REST request failed (status=%s)", response.status
+                        )
                         raise GoogleWifiFoyerConnectionError(
-                            f"Foyer returned HTTP {response.status}: {text[:300]}"
+                            f"Foyer returned HTTP {response.status}"
                         )
                     data = await response.json(content_type=None)
                     if not isinstance(data, dict):
@@ -507,14 +596,25 @@ class GoogleWifiFoyerApi:
                     )
                     and attempt == 0
                 ):
+                    _LOGGER.debug(
+                        "Foyer gRPC rejected cached access token; minting a fresh "
+                        "token and retrying once (status=%s)",
+                        err.code().name,
+                    )
                     token = await self._async_get_access_token(force_refresh=True)
                     continue
                 if err.code() in (
                     grpc.StatusCode.UNAUTHENTICATED,
                     grpc.StatusCode.PERMISSION_DENIED,
                 ):
+                    _LOGGER.warning(
+                        "Foyer gRPC authorization failed after token refresh "
+                        "(status=%s, attempt=%s)",
+                        err.code().name,
+                        attempt + 1,
+                    )
                     raise GoogleWifiFoyerAuthError(
-                        f"Foyer gRPC authentication failed: {err.details()}"
+                        f"Foyer gRPC authorization failed ({err.code().name})"
                     ) from err
                 raise GoogleWifiFoyerConnectionError(
                     f"Foyer gRPC request failed ({err.code().name}): {err.details()}"

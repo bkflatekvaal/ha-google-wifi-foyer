@@ -7,7 +7,6 @@ import secrets
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.const import CONF_EMAIL
@@ -190,7 +189,9 @@ class GoogleWifiFoyerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None and "oauth_token" in user_input:
             oauth_token = user_input["oauth_token"].strip()
-            android_id = secrets.token_hex(8)
+            # A Google master token represents an Android device/account pair.
+            # Keep the existing device identity when replacing the credential.
+            android_id = entry.data[CONF_ANDROID_ID]
 
             try:
                 master_token = await GoogleWifiFoyerApi.async_exchange_oauth_token(

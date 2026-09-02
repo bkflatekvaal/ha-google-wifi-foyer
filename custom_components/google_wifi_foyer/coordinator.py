@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -16,6 +16,7 @@ from .api import (
     GoogleWifiFoyerApi,
     GoogleWifiFoyerAuthError,
     GoogleWifiFoyerConnectionError,
+    GoogleWifiFoyerCredentialError,
 )
 from .const import (
     CONF_LAST_GUEST_SSID,
@@ -125,9 +126,12 @@ class GoogleWifiFoyerCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     )
                 else:
                     access_point["local_status"] = local_status
-        except GoogleWifiFoyerAuthError as err:
+        except GoogleWifiFoyerCredentialError as err:
+            _LOGGER.warning(
+                "Persisted Google credential was rejected; starting reauthentication"
+            )
             raise ConfigEntryAuthFailed(str(err)) from err
-        except GoogleWifiFoyerConnectionError as err:
+        except (GoogleWifiFoyerAuthError, GoogleWifiFoyerConnectionError) as err:
             raise UpdateFailed(str(err)) from err
 
         result: dict[str, dict[str, Any]] = {}
