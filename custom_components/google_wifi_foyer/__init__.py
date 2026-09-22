@@ -50,11 +50,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Trackers used to create one device-registry entry per station. Remove those
     # legacy devices; the device_tracker entities remain available independently.
+    # Preserve the legacy group/station identifier and scope cleanup to this entry.
     for station_id in coordinator.data:
-        station_device = device_registry.async_get_device(
-            identifiers={
-                (DOMAIN, f"{entry.data[CONF_GROUP_ID]}_{station_id}")
-            }
+        station_device = device_registry.async_get_device_by_identifier(
+            (DOMAIN, f"{entry.data[CONF_GROUP_ID]}_{station_id}"),
+            entry.entry_id,
         )
         if station_device is not None:
             device_registry.async_remove_device(station_device.id)
