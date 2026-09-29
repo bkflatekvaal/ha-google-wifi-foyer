@@ -53,7 +53,7 @@ class GoogleWifiFoyerStationTracker(
 ):
     """Presence tracker for one Foyer station."""
 
-    # Station trackers are intentionally not attached to a device-registry device.
+    # Station trackers do not explicitly create device-registry devices.
     # Treating their name as device-relative makes Home Assistant combine the
     # station name with itself (for example, ``epaperap_epaperap``).
     _attr_has_entity_name = False
@@ -77,9 +77,11 @@ class GoogleWifiFoyerStationTracker(
         station = self._station
         for key in ("friendlyName", "automaticFriendlyName", "dhcpHostname"):
             value = station.get(key)
-            if isinstance(value, str) and value and value != "Unnamed device":
-                return value
-        return "Unnamed device"
+            if isinstance(value, str):
+                value = value.strip()
+                if value and value != "Unnamed device":
+                    return value
+        return _station_mac(station) or "Unnamed device"
 
     @property
     def name(self) -> str:
@@ -112,13 +114,9 @@ class GoogleWifiFoyerStationTracker(
 
     @property
     def hostname(self) -> str | None:
-        """Return DHCP hostname, falling back to Google's friendly name."""
-        value = self._station.get("dhcpHostname")
-        if isinstance(value, str) and value:
-            return value
-
+        """Return the preferred Google Wifi name for scanner device naming."""
         # ScannerEntity uses hostname to name devices linked by MAC address.
-        # Avoid a MAC-only name when Google already provides a readable name.
+        # Use the same priority as the tracker name to keep both consistent.
         name = self._station_name
         return name if name != "Unnamed device" else None
 

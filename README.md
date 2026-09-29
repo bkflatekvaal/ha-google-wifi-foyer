@@ -6,7 +6,7 @@ It uses Google's undocumented `googlehomefoyer-pa.googleapis.com` API and the
 `https://www.googleapis.com/auth/accesspoints` OAuth scope. This may stop working
 without notice if Google changes the private API or authentication flow.
 
-## Current v0.5.3 scope
+## Current v0.5.4 scope
 
 - UI config flow
 - EmbeddedSetup `oauth_token` -> reusable `aas_et` master token
@@ -84,8 +84,24 @@ Google's station API reports current clients with `connected: true`. Offline cli
 are normally returned with `status.type = STATION_OFFLINE` and a `lastSeen` timestamp.
 
 All stations returned by Google are created as device trackers, including old/offline
-stations. Trackers do not create device-registry entries. Disable unwanted entities
-in Home Assistant's entity registry.
+stations. The integration does not explicitly create device-registry entries for
+trackers, but Home Assistant may link them to devices known by MAC address.
+Disable unwanted entities in Home Assistant's entity registry.
+
+Tracker names and the name supplied to Home Assistant for linked devices use the
+same priority:
+
+1. Google Wifi friendly name (`friendlyName`)
+2. Google's automatic friendly name (`automaticFriendlyName`)
+3. DHCP hostname (`dhcpHostname`)
+4. MAC address
+
+Empty names and the placeholder `Unnamed device` are skipped. If no usable name
+or MAC address is available, the tracker displays `Unnamed device`. The
+`google_wifi_name` attribute follows the same priority, and the `host_name`
+attribute reflects this preferred name rather than necessarily the DHCP hostname.
+Existing device names may require an integration reload to refresh; names manually
+assigned in Home Assistant take precedence.
 
 Connected-client counts (including total, Wi-Fi, wired, guest, per-access-point, and
 Family Wi-Fi counts) and the access-point count are numeric measurement sensors. Home
