@@ -112,9 +112,15 @@ class GoogleWifiFoyerStationTracker(
 
     @property
     def hostname(self) -> str | None:
-        """Return DHCP hostname."""
+        """Return DHCP hostname, falling back to Google's friendly name."""
         value = self._station.get("dhcpHostname")
-        return value if isinstance(value, str) and value else None
+        if isinstance(value, str) and value:
+            return value
+
+        # ScannerEntity uses hostname to name devices linked by MAC address.
+        # Avoid a MAC-only name when Google already provides a readable name.
+        name = self._station_name
+        return name if name != "Unnamed device" else None
 
     @property
     def mac_address(self) -> str | None:
