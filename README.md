@@ -6,7 +6,7 @@ It uses Google's undocumented `googlehomefoyer-pa.googleapis.com` API and the
 `https://www.googleapis.com/auth/accesspoints` OAuth scope. This may stop working
 without notice if Google changes the private API or authentication flow.
 
-## Current v0.5.4 scope
+## Current v0.5.5 scope
 
 - UI config flow
 - EmbeddedSetup `oauth_token` -> reusable `aas_et` master token
@@ -63,6 +63,12 @@ Copy `custom_components/google_wifi_foyer` from the
 add **Google Wifi Foyer** from **Settings -> Devices & services**.
 
 Home Assistant installs the required Python dependencies automatically.
+
+The gRPC requirement allows Home Assistant to select its own constrained version
+(including `grpcio==1.83.1` in Home Assistant 2026.10). An exact older pin can
+prevent integration setup after a Home Assistant upgrade. If your log reports
+`Requirements for google_wifi_foyer not found: ['grpcio==1.78.0']`, replace the
+installed integration with this updated copy and restart Home Assistant.
 
 ## Getting the oauth_token
 
